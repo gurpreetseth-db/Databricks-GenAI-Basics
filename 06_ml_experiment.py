@@ -64,8 +64,8 @@ else:
 
 
 SCHEMA           = "financial_data"
-FOUNDATION_MODEL = "databricks-meta-llama-3-3-70b-instruct"
-AI_GW_ROUTE      = "databank-llm-route"
+FOUNDATION_MODEL = "gemma-3-12b"
+AI_GW_ROUTE      = "test_ai_gateway"
 EXPERIMENT_NAME  = f"/Users/{user}/databank-ai-lab/databank-prompt-experiments"
 
 # ================================================================
@@ -78,17 +78,28 @@ from openai import OpenAI
 from databricks.sdk import WorkspaceClient
 import time
 import json
+import logging
+
+# Suppress harmless Py4J security warning on Serverless compute
+logging.getLogger("mlflow.tracking.context.registry").setLevel(logging.ERROR)
 
 w = WorkspaceClient()
 
 # Use AI Gateway route (Module 02) or fall back to Foundation Models directly
 try:
     w.serving_endpoints.get(name=AI_GW_ROUTE)
+    # Verify the gateway actually works with a quick test call
+    _test_client = OpenAI(api_key=_token, base_url=f"{w.config.host}/serving-endpoints")
+    _test_client.chat.completions.create(
+        model=AI_GW_ROUTE,
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=5
+    )
     ACTIVE_MODEL = AI_GW_ROUTE
     print(f"✅ Using AI Gateway route: {AI_GW_ROUTE}")
-except Exception:
-    ACTIVE_MODEL = FOUNDATION_MODEL
-    print(f"⚠️  AI Gateway not found, using Foundation Models directly: {FOUNDATION_MODEL}")
+except Exception as e:
+    ACTIVE_MODEL = f"databricks-{FOUNDATION_MODEL}"
+    print(f"⚠️  AI Gateway not usable ({type(e).__name__}), using Foundation Model: {ACTIVE_MODEL}")
 
 _token = w.config.authenticate().get("Authorization", "").replace("Bearer ", "")
 
@@ -104,6 +115,7 @@ print(f"\n📈 MLflow Experiment: {EXPERIMENT_NAME}")
 # DBTITLE 1,Step 1 — Create MLflow Experiment
 # Create or get experiment
 # Using a personal folder path following workspace policy
+w.workspace.mkdirs(path="/".join(EXPERIMENT_NAME.split("/")[:-1]))
 mlflow.set_experiment(EXPERIMENT_NAME)
 experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
 
@@ -179,7 +191,7 @@ for name, prompt in PROMPT_VARIANTS.items():
 # COMMAND ----------
 
 # DBTITLE 1,Step 3 — Run Experiments
-from openai import BadRequestError, RateLimitError, InternalServerError
+from openai import BadRequestError, RateLimitError, InternalServerError, PermissionDeniedError
 
 def run_experiment(prompt_name: str, system_prompt: str, question: str, temperature: float) -> dict:
     """Run one LLM call and return metrics."""
@@ -209,6 +221,42 @@ def run_experiment(prompt_name: str, system_prompt: str, question: str, temperat
             "total_tokens":      response.usage.total_tokens,
             "relevance_score":   relevance_score
         }
+    except PermissionDeniedError:
+        # AI Gateway permission denied — fall back to foundation model
+        fallback_model = f"databricks-{FOUNDATION_MODEL}"
+        print(f"  ⚠️  Permission denied on {ACTIVE_MODEL}, retrying with {fallback_model}...")
+        try:
+            response = client.chat.completions.create(
+                model=fallback_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": question}
+                ],
+                temperature=temperature,
+                max_tokens=400
+            )
+            latency_ms = int((time.time() - start) * 1000)
+            answer = response.choices[0].message.content
+            financial_terms = ["rate", "risk", "protect", "invest", "savings", "tax",
+                               "annual", "income", "capital", "interest", "premium"]
+            relevance_score = sum(1 for term in financial_terms if term.lower() in answer.lower())
+            return {
+                "answer":            answer,
+                "latency_ms":        latency_ms,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens":      response.usage.total_tokens,
+                "relevance_score":   relevance_score
+            }
+        except Exception:
+            latency_ms = int((time.time() - start) * 1000)
+            print(f"  ⚠️  Fallback also failed — skipping question.")
+            return {
+                "answer":            "[permission_denied]",
+                "latency_ms":        latency_ms,
+                "completion_tokens": 0,
+                "total_tokens":      0,
+                "relevance_score":   0
+            }
     except BadRequestError:
         # AI Gateway guardrail triggered — log and continue so the run completes
         latency_ms = int((time.time() - start) * 1000)
@@ -340,7 +388,7 @@ for temp in TEMPERATURES:
             mlflow.log_metric("max_relevance",    max(all_relevance))
 
             run_count += 1
-            print(f"  [{run_count}] {prompt_name} | temp={temp} | "
+            print(f"  [{run_count}] | {question} | temp={temp} | "
                   f"avg_latency={sum(all_latencies)//len(all_latencies)}ms | "
                   f"avg_relevance={sum(all_relevance)/len(all_relevance):.1f}")
 

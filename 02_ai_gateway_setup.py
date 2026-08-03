@@ -3,7 +3,70 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
+# DBTITLE 1,Create AI Gateway Route
+# Create the AI Gateway endpoint programmatically
+from databricks.sdk.service.serving import (
+    EndpointCoreConfigInput,
+    ServedEntityInput,
+    ExternalModel,
+    ExternalModelProvider,
+    DatabricksModelServingConfig,
+    AiGatewayConfig,
+    AiGatewayRateLimit,
+    AiGatewayRateLimitRenewalPeriod,
+    AiGatewayRateLimitKey,
+    AiGatewayGuardrails,
+    AiGatewayGuardrailParameters,
+    AiGatewayGuardrailPiiBehavior,
+    AiGatewayGuardrailPiiBehaviorBehavior,
+    AiGatewayUsageTrackingConfig,
+)
 
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+
+ROUTE_NAME = "test_ai_gateway"
+
+print(f"🚀 Creating AI Gateway route: '{ROUTE_NAME}'...")
+
+try:
+    existing = w.serving_endpoints.get(name=ROUTE_NAME)
+    print(f"✅ Endpoint '{ROUTE_NAME}' already exists (state: {existing.state.ready})")
+    print(f"🔗 URL: {w.config.host}/serving-endpoints/{ROUTE_NAME}/invocations")
+except Exception:
+    endpoint = w.serving_endpoints.create(
+    name=ROUTE_NAME,
+    config=EndpointCoreConfigInput(
+        served_entities=[
+            ServedEntityInput(
+                external_model=ExternalModel(
+                    provider=ExternalModelProvider.DATABRICKS_MODEL_SERVING,
+                    name="databricks-gemma-3-12b",
+                    task="llm/v1/chat",
+                    databricks_model_serving_config=DatabricksModelServingConfig(
+                        databricks_workspace_url=w.config.host,
+                        databricks_api_token_plaintext=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
+                    ),
+                ),
+            )
+        ]
+    ),
+    ai_gateway=AiGatewayConfig(
+        rate_limits=[
+            AiGatewayRateLimit(
+                calls=100,
+                renewal_period=AiGatewayRateLimitRenewalPeriod.MINUTE,
+                key=AiGatewayRateLimitKey.USER,
+            )
+        ],
+        usage_tracking_config=AiGatewayUsageTrackingConfig(enabled=True),
+        # Note: AI Guardrails (PII/safety) not supported for this endpoint type in this workspace.
+        # You can add them later via the UI once the endpoint is created.
+    ),
+)
+
+    print(f"✅ Endpoint '{ROUTE_NAME}' created successfully!")
+    print(f"🔗 URL: {w.config.host}/serving-endpoints/{ROUTE_NAME}/invocations")
 
 # COMMAND ----------
 
@@ -61,8 +124,8 @@ else:
     CATALOG = "databank_lab"
 
 SCHEMA           = "financial_data"
-AI_GW_ROUTE      = "databank-llm-route"
-FOUNDATION_MODEL = "databricks-meta-llama-3-3-70b-instruct"
+AI_GW_ROUTE      = "test_ai_gateway"
+FOUNDATION_MODEL = "databricks-gemma-3-12b"
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import serving
@@ -95,7 +158,7 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 # MAGIC ### Two Creation Approaches
 # MAGIC
 # MAGIC **Option A: Databricks UI** (covered in the step below)
-# MAGIC **Option B: Databricks SDK** (programmatic — covered in Step 2)
+# MAGIC **Option B: Databricks SDK** (not covered here :) )
 
 # COMMAND ----------
 
@@ -105,33 +168,38 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 # MAGIC
 # MAGIC Follow these steps in the Databricks workspace UI:
 # MAGIC
-# MAGIC 1. In the left sidebar, click **Serving** (rocket icon)
-# MAGIC 2. Click the **AI Gateway** tab at the top
-# MAGIC 3. Click **Create AI Gateway**
-# MAGIC 4. Fill in the configuration:
+# MAGIC 1. In the left sidebar, click **AI/ML** (rocket icon)
+# MAGIC 2. Click the **AI Gateway -> Model**
+# MAGIC 3. Click ** Foundation Model**  and use below configurations
+# MAGIC 4. Fill in the configuration and hit **Create**:
 # MAGIC
 # MAGIC    | Field | Value |
 # MAGIC    |-------|-------|
 # MAGIC    | **Route name** | `databank-llm-route` |
 # MAGIC    | **Route type** | `LLM/v1/Chat` |
-# MAGIC    | **Model provider** | `Databricks` |
-# MAGIC    | **Model name** | `databricks-meta-llama-3-3-70b-instruct` |
+# MAGIC    | **Model provider** | `Foundation Model` |
+# MAGIC    | **Model name** | `Gemma 3-12B` |
 # MAGIC
-# MAGIC 5. Under **Rate limits**, click **Add rate limit**:
-# MAGIC    - Calls: `100`
-# MAGIC    - Per: `User`
-# MAGIC    - Renewal period: `Minute`
+# MAGIC 5. Expand **Governance Setup**
+# MAGIC 6. Under **Rate limits**, click **Add rate limit**:
+# MAGIC    - Per Endpoint/User: `Per User`
+# MAGIC    - Requests : `100`
+# MAGIC    - Per: `hour`
+# MAGIC 7. Hit **Save**
+# MAGIC 8. Under **Policies**
+# MAGIC 9. Click **New Policy** use below configurations to create 2 policies:
+# MAGIC    - Name : `Test_PII`
+# MAGIC    - Guardrail : `PII Blocking`
+# MAGIC    - Phase : `Input & Output`
+# MAGIC    - Advance Options - Mode: `Enforce`
+# MAGIC    
+# MAGIC    - Name: `Test_Unsafe`
+# MAGIC    - Guardrail : `Unsafe Content`
+# MAGIC    - Phase : `Input & Output`
+# MAGIC    - Advance Options - Evaluation Model :  `system-ai.gpt-5-2`
+# MAGIC    - Advance Options - Mode: `Enforce`
 # MAGIC
-# MAGIC 6. Under **Usage tracking**, toggle **Enable usage tracking** ON
-# MAGIC
-# MAGIC 7. Under **Guardrails → Input**, enable:
-# MAGIC    - **PII detection**: Block
-# MAGIC    - **Safety**: Block
-# MAGIC
-# MAGIC 8. Under **Guardrails → Output**, enable:
-# MAGIC    - **Safety**: Block
-# MAGIC
-# MAGIC 9. Click **Create** and wait ~30 seconds for the route to become active
+# MAGIC 10. Click **Create** and wait ~30 seconds for the route to become active
 # MAGIC
 # MAGIC > ⚡ Once created, the route URL will be: `{workspace_url}/serving-endpoints/{route_name}/invocations`
 # MAGIC
@@ -141,11 +209,83 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 
 # COMMAND ----------
 
+# DBTITLE 1,Option 2 - Via Code
+# Create the AI Gateway endpoint programmatically
+from databricks.sdk.service.serving import (
+    EndpointCoreConfigInput,
+    ServedEntityInput,
+    ExternalModel,
+    ExternalModelProvider,
+    DatabricksModelServingConfig,
+    AiGatewayConfig,
+    AiGatewayRateLimit,
+    AiGatewayRateLimitRenewalPeriod,
+    AiGatewayRateLimitKey,
+    AiGatewayGuardrails,
+    AiGatewayGuardrailParameters,
+    AiGatewayGuardrailPiiBehavior,
+    AiGatewayGuardrailPiiBehaviorBehavior,
+    AiGatewayUsageTrackingConfig,
+)
+
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+
+
+
+print(f"🚀 Creating AI Gateway route: '{AI_GW_ROUTE}'...")
+
+try:
+    existing = w.serving_endpoints.get(name=ROUTE_NAME)
+    print(f"✅ Endpoint '{AI_GW_ROUTE}' already exists (state: {existing.state.ready})")
+    print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
+except Exception:
+    endpoint = w.serving_endpoints.create(
+    name=AI_GW_ROUTE,
+    config=EndpointCoreConfigInput(
+        served_entities=[
+            ServedEntityInput(
+                external_model=ExternalModel(
+                    provider=ExternalModelProvider.DATABRICKS_MODEL_SERVING,
+                    name="databricks-gemma-3-12b",
+                    task="llm/v1/chat",
+                    databricks_model_serving_config=DatabricksModelServingConfig(
+                        databricks_workspace_url=w.config.host,
+                        databricks_api_token_plaintext=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
+                    ),
+                ),
+            )
+        ]
+    ),
+    ai_gateway=AiGatewayConfig(
+        rate_limits=[
+            AiGatewayRateLimit(
+                calls=100,
+                renewal_period=AiGatewayRateLimitRenewalPeriod.MINUTE,
+                key=AiGatewayRateLimitKey.USER,
+            )
+        ],
+        usage_tracking_config=AiGatewayUsageTrackingConfig(enabled=True),
+        # Note: AI Guardrails (PII/safety) not supported for this endpoint type in this workspace.
+        # You can add them later via the UI once the endpoint is created.
+    ),
+)
+
+    print(f"✅ Endpoint '{AI_GW_ROUTE}' created successfully!")
+    print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
+
+# COMMAND ----------
+
 # DBTITLE 1,Step 2 — Inspect Gateway Configuration
 # Retrieve and display the AI Gateway configuration
-endpoint = w.serving_endpoints.get(name=AI_GW_ROUTE)
+try:
+    endpoint = w.serving_endpoints.get(name=AI_GW_ROUTE)
+except Exception as e:
+    print(f"⚠️  Endpoint '{AI_GW_ROUTE}' not found. Please create it via the UI (Option A above) first.")
+    print(f"   Error: {e}")
+    endpoint = None
 
-if endpoint.ai_gateway:
+if endpoint and endpoint.ai_gateway:
     gw = endpoint.ai_gateway
     print(f"📊 AI Gateway Configuration: {AI_GW_ROUTE}")
     print(f"   Endpoint state : {endpoint.state.ready if endpoint.state else 'READY'}")
@@ -161,10 +301,11 @@ if endpoint.ai_gateway:
     if gw.guardrails:
         print(f"   PII guardrail  : Input={gw.guardrails.input.pii.behavior if gw.guardrails.input and gw.guardrails.input.pii else 'OFF'}")
         print(f"   Safety guard   : Input={gw.guardrails.input.safety if gw.guardrails.input else 'OFF'}, Output={gw.guardrails.output.safety if gw.guardrails.output else 'OFF'}")
-else:
+elif endpoint:
     print(f"✅ Endpoint '{AI_GW_ROUTE}' is live (AI Gateway config not shown for legacy routes)")
 
-print(f"\n🔗 Invocation URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
+if endpoint:
+    print(f"\n🔗 Invocation URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
 
 # COMMAND ----------
 
@@ -199,15 +340,11 @@ client = OpenAI(
     base_url=f"{w.config.host}/serving-endpoints"
 )
 
-# Check if AI Gateway route exists; fall back to Foundation Models if not
-try:
-    w.serving_endpoints.get(name=AI_GW_ROUTE)
-    MODEL_TO_USE = AI_GW_ROUTE
-    print(f"🛡️  Using AI Gateway route: {AI_GW_ROUTE}")
-except Exception:
-    MODEL_TO_USE = FOUNDATION_MODEL
-    print(f"⚡ Using Foundation Model directly: {FOUNDATION_MODEL}")
-    print("   (Create the AI Gateway route via Option A for rate limits + guardrails)")
+# Use Foundation Model directly (the gateway route needs a PAT for proxying).
+# Once you configure a PAT in the gateway endpoint, switch MODEL_TO_USE to AI_GW_ROUTE.
+MODEL_TO_USE = FOUNDATION_MODEL
+print(f"⚡ Using Foundation Model directly: {FOUNDATION_MODEL}")
+print(f"   (Gateway route '{AI_GW_ROUTE}' exists but needs a PAT for proxying — see note below)")
 
 SYSTEM_PROMPT = """
 You are a DataBank financial advisor assistant. You provide clear, professional

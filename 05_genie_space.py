@@ -7,7 +7,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Module 05 — Welcome
+# DBTITLE 1,Module 07 — Welcome
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Module 05: Genie Space
 # MAGIC **Duration:** ~15 minutes | **Prerequisite:** Module 01 (data tables)
@@ -309,7 +309,7 @@ print("Complete Option A (UI) first, then note your Genie Space ID for Module 07
 #   https://workspace.azuredatabricks.net/#genie/<SPACE_ID>
 # ============================================================
 
-GENIE_SPACE_ID = "01f17b4161221becbadc20a41938d27a"  # <-- FILL THIS IN after creating the space
+GENIE_SPACE_ID = genie_space_id # "01f17b4161221becbadc20a41938d27a"  # <-- FILL THIS IN after creating the space
 
 if not GENIE_SPACE_ID:
     print("⚠️ GENIE_SPACE_ID is empty.")
@@ -391,7 +391,7 @@ else:
 # MAGIC
 # MAGIC ---
 # MAGIC
-# MAGIC ### 📝 Note for Module 07
+# MAGIC ### 📝 Note for Module 06
 # MAGIC When building the AgentBricks Supervisor Agent, you will need your Genie Space ID.
 # MAGIC Record it here for easy reference:
 # MAGIC

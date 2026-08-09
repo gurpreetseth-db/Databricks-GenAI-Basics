@@ -3,10 +3,6 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-
-
-# COMMAND ----------
-
 # DBTITLE 1,Module 01 — Welcome
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Module 01: Data Generation
@@ -40,8 +36,31 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Install Required Packages
-# MAGIC %pip install faker==25.9.1 reportlab==4.2.5 -q
+# MAGIC %md
+# MAGIC ## 🏗️ Infrastructure Setup
+# MAGIC
+# MAGIC ### Unity Catalog Hierarchy
+# MAGIC ```
+# MAGIC YOUR CATALOG NAME.                    ← Catalog (top-level namespace)
+# MAGIC └── financial_data                    ← Schema (logical grouping)
+# MAGIC     ├── customers                     ← Delta table (Module 01)
+# MAGIC     ├── accounts                      ← Delta table (Module 01)
+# MAGIC     ├── transactions                  ← Delta table (Module 01)
+# MAGIC     ├── products                      ← Delta table (Module 01)
+# MAGIC     ├── support_tickets               ← Delta table (Module 01)
+# MAGIC     ├── product_docs_chunks           ← Delta table (Module 04)
+# MAGIC     ├── product_docs_index            ← Vector Search Index (Module 04)
+# MAGIC     └── documents/                    ← Volume (PDFs stored here)
+# MAGIC         ├── product_brochures/
+# MAGIC         └── compliance/
+# MAGIC ```
+# MAGIC
+# MAGIC **Key concept:** Unity Catalog provides a 3-level namespace (`catalog.schema.table`) giving you centralised governance, access control, and lineage across all data assets.
+
+# COMMAND ----------
+
+# DBTITLE 1,Step 1 - Run the Setup Notebook
+# MAGIC %run ./00_setup_prerequisites
 
 # COMMAND ----------
 
@@ -53,19 +72,19 @@
 # Get logged-in user information
 # If running this lab via Partner Academy Vocarium 
 
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
+#user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
 
 # Extract username before '@' and remove special characters
-import re
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
+#import re
+#username_clean = re.sub(r'\W+', '', user.split('@')[0])
 
-if "labuser" in username_clean:
-    CATALOG = username_clean
-else:
-    CATALOG = "databank_lab"
+#if "labuser" in username_clean:
+#    CATALOG = username_clean
+#else:
+#    CATALOG = "databank_lab"
 
-SCHEMA       = "financial_data"
-VOLUME_PATH  = f"/Volumes/{CATALOG}/{SCHEMA}/documents"
+#SCHEMA       = "financial_data"
+#VOLUME_PATH  = f"/Volumes/{CATALOG}/{SCHEMA}/documents"
 
 # ================================================================
 # IMPORTS

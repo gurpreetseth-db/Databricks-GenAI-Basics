@@ -3,73 +3,6 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-# DBTITLE 1,Create AI Gateway Route
-# Create the AI Gateway endpoint programmatically
-from databricks.sdk.service.serving import (
-    EndpointCoreConfigInput,
-    ServedEntityInput,
-    ExternalModel,
-    ExternalModelProvider,
-    DatabricksModelServingConfig,
-    AiGatewayConfig,
-    AiGatewayRateLimit,
-    AiGatewayRateLimitRenewalPeriod,
-    AiGatewayRateLimitKey,
-    AiGatewayGuardrails,
-    AiGatewayGuardrailParameters,
-    AiGatewayGuardrailPiiBehavior,
-    AiGatewayGuardrailPiiBehaviorBehavior,
-    AiGatewayUsageTrackingConfig,
-)
-
-from databricks.sdk import WorkspaceClient
-w = WorkspaceClient()
-
-ROUTE_NAME = "test_ai_gateway"
-
-print(f"🚀 Creating AI Gateway route: '{ROUTE_NAME}'...")
-
-try:
-    existing = w.serving_endpoints.get(name=ROUTE_NAME)
-    print(f"✅ Endpoint '{ROUTE_NAME}' already exists (state: {existing.state.ready})")
-    print(f"🔗 URL: {w.config.host}/serving-endpoints/{ROUTE_NAME}/invocations")
-except Exception:
-    endpoint = w.serving_endpoints.create(
-    name=ROUTE_NAME,
-    config=EndpointCoreConfigInput(
-        served_entities=[
-            ServedEntityInput(
-                external_model=ExternalModel(
-                    provider=ExternalModelProvider.DATABRICKS_MODEL_SERVING,
-                    name="databricks-gemma-3-12b",
-                    task="llm/v1/chat",
-                    databricks_model_serving_config=DatabricksModelServingConfig(
-                        databricks_workspace_url=w.config.host,
-                        databricks_api_token_plaintext=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
-                    ),
-                ),
-            )
-        ]
-    ),
-    ai_gateway=AiGatewayConfig(
-        rate_limits=[
-            AiGatewayRateLimit(
-                calls=100,
-                renewal_period=AiGatewayRateLimitRenewalPeriod.MINUTE,
-                key=AiGatewayRateLimitKey.USER,
-            )
-        ],
-        usage_tracking_config=AiGatewayUsageTrackingConfig(enabled=True),
-        # Note: AI Guardrails (PII/safety) not supported for this endpoint type in this workspace.
-        # You can add them later via the UI once the endpoint is created.
-    ),
-)
-
-    print(f"✅ Endpoint '{ROUTE_NAME}' created successfully!")
-    print(f"🔗 URL: {w.config.host}/serving-endpoints/{ROUTE_NAME}/invocations")
-
-# COMMAND ----------
-
 # DBTITLE 1,Module 02 — Welcome
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Module 02: AI Gateway
@@ -105,28 +38,11 @@ except Exception:
 
 # COMMAND ----------
 
+# MAGIC %run ./00_setup_prerequisites
+
+# COMMAND ----------
+
 # DBTITLE 1,Step 0 — Configuration
-# ================================================================
-# CONFIGURATION
-# ================================================================
-# Get logged-in user information
-# If running this lab via Partner Academy Vocarium 
-
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-# Extract username before '@' and remove special characters
-import re
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
-
-if "labuser" in username_clean:
-    CATALOG = username_clean
-else:
-    CATALOG = "databank_lab"
-
-SCHEMA           = "financial_data"
-AI_GW_ROUTE      = "test_ai_gateway"
-FOUNDATION_MODEL = "databricks-gemma-3-12b"
-
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import serving
 from openai import OpenAI
@@ -210,7 +126,16 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 # COMMAND ----------
 
 # DBTITLE 1,Option 2 - Via Code
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service import serving
+from openai import OpenAI
+import json
+
+w = WorkspaceClient()
+
 # Create the AI Gateway endpoint programmatically
+# This creates a pay-per-token AI Gateway route for a Foundation Model
+# with rate limiting and usage tracking.
 from databricks.sdk.service.serving import (
     EndpointCoreConfigInput,
     ServedEntityInput,
@@ -221,57 +146,72 @@ from databricks.sdk.service.serving import (
     AiGatewayRateLimit,
     AiGatewayRateLimitRenewalPeriod,
     AiGatewayRateLimitKey,
-    AiGatewayGuardrails,
-    AiGatewayGuardrailParameters,
-    AiGatewayGuardrailPiiBehavior,
-    AiGatewayGuardrailPiiBehaviorBehavior,
     AiGatewayUsageTrackingConfig,
 )
 
 from databricks.sdk import WorkspaceClient
 w = WorkspaceClient()
 
-
-
 print(f"🚀 Creating AI Gateway route: '{AI_GW_ROUTE}'...")
+print(f"   Foundation Model: {FOUNDATION_MODEL}")
+
+# Get a long-lived PAT for the endpoint proxy
+pat_token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
 
 try:
-    existing = w.serving_endpoints.get(name=ROUTE_NAME)
-    print(f"✅ Endpoint '{AI_GW_ROUTE}' already exists (state: {existing.state.ready})")
+    existing = w.serving_endpoints.get(name=AI_GW_ROUTE)
+    # Verify the proxy actually works (token may be missing/expired)
+    from openai import OpenAI as _OAI
+    _client = _OAI(api_key=pat_token, base_url=f"{w.config.host}/serving-endpoints")
+    _test = _client.chat.completions.create(model=AI_GW_ROUTE, messages=[{"role": "user", "content": "test"}], max_tokens=5)
+    print(f"✅ AI Gateway '{AI_GW_ROUTE}' exists and proxy is working!")
+    if existing.ai_gateway:
+        print(f"   Rate limits: {len(existing.ai_gateway.rate_limits or [])} configured")
+        print(f"   Usage tracking: {existing.ai_gateway.usage_tracking_config.enabled if existing.ai_gateway.usage_tracking_config else False}")
     print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
-except Exception:
-    endpoint = w.serving_endpoints.create(
-    name=AI_GW_ROUTE,
-    config=EndpointCoreConfigInput(
-        served_entities=[
-            ServedEntityInput(
-                external_model=ExternalModel(
-                    provider=ExternalModelProvider.DATABRICKS_MODEL_SERVING,
-                    name="databricks-gemma-3-12b",
-                    task="llm/v1/chat",
-                    databricks_model_serving_config=DatabricksModelServingConfig(
-                        databricks_workspace_url=w.config.host,
-                        databricks_api_token_plaintext=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
-                    ),
-                ),
-            )
-        ]
-    ),
-    ai_gateway=AiGatewayConfig(
-        rate_limits=[
-            AiGatewayRateLimit(
-                calls=100,
-                renewal_period=AiGatewayRateLimitRenewalPeriod.MINUTE,
-                key=AiGatewayRateLimitKey.USER,
-            )
-        ],
-        usage_tracking_config=AiGatewayUsageTrackingConfig(enabled=True),
-        # Note: AI Guardrails (PII/safety) not supported for this endpoint type in this workspace.
-        # You can add them later via the UI once the endpoint is created.
-    ),
-)
+except Exception as e:
+    # Either endpoint doesn't exist or proxy is broken — (re)create with valid PAT
+    print(f"⚠️  Gateway needs (re)creation: {type(e).__name__}")
+    try:
+        w.serving_endpoints.delete(name=AI_GW_ROUTE)
+        import time; time.sleep(5)
+        print("   Deleted broken endpoint.")
+    except Exception:
+        pass
 
-    print(f"✅ Endpoint '{AI_GW_ROUTE}' created successfully!")
+    endpoint = w.serving_endpoints.create(
+        name=AI_GW_ROUTE,
+        config=EndpointCoreConfigInput(
+            served_entities=[
+                ServedEntityInput(
+                    external_model=ExternalModel(
+                        provider=ExternalModelProvider.DATABRICKS_MODEL_SERVING,
+                        name=FOUNDATION_MODEL,
+                        task="llm/v1/chat",
+                        databricks_model_serving_config=DatabricksModelServingConfig(
+                            databricks_workspace_url=w.config.host,
+                            databricks_api_token_plaintext=pat_token,
+                        ),
+                    ),
+                )
+            ]
+        ),
+        ai_gateway=AiGatewayConfig(
+            rate_limits=[
+                AiGatewayRateLimit(
+                    calls=100,
+                    renewal_period=AiGatewayRateLimitRenewalPeriod.MINUTE,
+                    key=AiGatewayRateLimitKey.USER,
+                )
+            ],
+            usage_tracking_config=AiGatewayUsageTrackingConfig(enabled=True),
+        ),
+    )
+
+    print(f"✅ AI Gateway '{AI_GW_ROUTE}' created successfully!")
+    print(f"   Rate limit: 100 requests/min/user")
+    print(f"   Usage tracking: Enabled")
+    print(f"   Guardrails: Add via UI (AI/ML → AI Gateway → Policies)")
     print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
 
 # COMMAND ----------
@@ -340,11 +280,22 @@ client = OpenAI(
     base_url=f"{w.config.host}/serving-endpoints"
 )
 
-# Use Foundation Model directly (the gateway route needs a PAT for proxying).
-# Once you configure a PAT in the gateway endpoint, switch MODEL_TO_USE to AI_GW_ROUTE.
-MODEL_TO_USE = FOUNDATION_MODEL
-print(f"⚡ Using Foundation Model directly: {FOUNDATION_MODEL}")
-print(f"   (Gateway route '{AI_GW_ROUTE}' exists but needs a PAT for proxying — see note below)")
+# Try the AI Gateway route; fall back to Foundation Model if gateway proxy fails
+try:
+    _test = client.chat.completions.create(
+        model=AI_GW_ROUTE,
+        messages=[{"role": "user", "content": "test"}],
+        max_tokens=5
+    )
+    MODEL_TO_USE = AI_GW_ROUTE
+    print(f"⚡ Using AI Gateway route: {AI_GW_ROUTE}")
+    print(f"   Backing model: {FOUNDATION_MODEL}")
+except Exception as e:
+    # Use llama-3-3 directly
+    MODEL_TO_USE = "databricks-meta-llama-3-3-70b-instruct"
+    print(f"⚡ AI Gateway proxy unavailable — calling Foundation Model directly: {MODEL_TO_USE}")
+    print(f"   Error: {type(e).__name__}: {str(e)[:150]}")
+    print(f"   Fix: Re-run Cell 6 (Option 2 - Via Code) to recreate with valid PAT")
 
 SYSTEM_PROMPT = """
 You are a DataBank financial advisor assistant. You provide clear, professional
@@ -374,7 +325,10 @@ for i, question in enumerate(test_questions, 1):
         max_tokens=200
     )
     answer = response.choices[0].message.content
-    print(f"🤖 Response: {answer[:300]}{'...' if len(answer) > 300 else ''}")
+    if not answer:
+        answer = response.choices[0].message.model_dump().get("reasoning_content", "")
+    print(f"🤖 Response: {answer[:500]}{'...' if len(answer) > 500 else ''}")
+    print(" ")
     print(f"   Tokens used: {response.usage.total_tokens}")
 
 print(f"\n✅ LLM test complete (via {MODEL_TO_USE})")

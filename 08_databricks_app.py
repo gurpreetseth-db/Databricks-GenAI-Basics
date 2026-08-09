@@ -94,6 +94,8 @@ def get_superagent_endpoint_name(superagent_name):
 
 endpoint_name= get_superagent_endpoint_name(AGENT_ENDPOINT)
 
+HOST = WorkspaceClient().config.host
+
 print(f"🚀 App Name    : {APP_NAME}")
 print(f"📁 App Dir     : {APP_DIR}")
 print(f"🏠 Workspace  : {HOST}")
@@ -106,6 +108,7 @@ print(f"🤖 Endpoint   : {endpoint_name}")
 
 # DBTITLE 1,Step 1 — Write app.py (Gradio Chat Interface)
 # Write the Gradio app source to the workspace filesystem
+import os
 os.makedirs(APP_DIR, exist_ok=True)
 
 app_py_content = '''

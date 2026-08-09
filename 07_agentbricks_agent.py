@@ -244,33 +244,34 @@ def get_superagent_endpoint_name(superagent_name):
     all_eps   = list(_w.serving_endpoints.list())
     
     # 1. Exact name match
-    endpoint_name = next((ep.name for ep in all_eps if ep.name == SUPERAGENT_NAME), None)
+    endpoint_name = next((ep.name for ep in all_eps if ep.name == superagent_name), None)
     
     # 2. Fuzzy match (normalised agent name appears inside endpoint name
     if not endpoint_name:
-        term = normalise(SUPERAGENT_NAME)
+        term = normalise(superagent_name)
         endpoint_name = next((ep.name for ep in all_eps if term in normalise(ep.name)), None)
     
     # 3. AgentBricks fallback — supervisor agent endpoints are always named mas-<uuid>-endpoint
     if not endpoint_name:
         mas_eps = [ep.name for ep in all_eps
             if ep.name.startswith("mas-") and ep.name.endswith("-endpoint")]
-    if len(mas_eps) == 1:
-        endpoint_name = mas_eps[0]
-    elif len(mas_eps) > 1:
-        print(f"⚠️  Multiple AgentBricks supervisor endpoints found.")
-        print(f"   Update SUPERAGENT_NAME in cell 5 to one of:")
-        for n in mas_eps:
-            print(f"   {n}")
+        if len(mas_eps) == 1:
+            endpoint_name = mas_eps[0]
+        elif len(mas_eps) > 1:
+            print(f"⚠️  Multiple AgentBricks supervisor endpoints found.")
+            print(f"   Update SUPERAGENT_NAME in cell 5 to one of:")
+            for n in mas_eps:
+                print(f"   {n}")
 
     if endpoint_name:
-        ENDPOINTNAME = endpoint_name          # available for downstream cells
-        print(f"Supervisor Agent Name : {SUPERAGENT_NAME}")
+        print(f"Supervisor Agent Name : {superagent_name}")
         print(f"Endpoint Name         : {endpoint_name}")
     else:
-        print(f"⚠️  Could not resolve endpoint for '{SUPERAGENT_NAME}'")
+        print(f"⚠️  Could not resolve endpoint for '{superagent_name}'")
 
-get_superagent_endpoint_name(SUPERAGENT_NAME)
+    return endpoint_name
+
+endpoint_name = get_superagent_endpoint_name(SUPERAGENT_NAME)
 
 # Use the endpoint name from the MAS creation response, or the configured name
 active_endpoint = endpoint_name
@@ -299,6 +300,7 @@ else:
 
 # DBTITLE 1,Step 3 — Test Agent Scenarios
 import openai
+import requests
 
 # Connect to the deployed Supervisor Agent endpoint
 import os

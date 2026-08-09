@@ -44,10 +44,12 @@ user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
 
 CATALOG          = "databank_lab"
 SCHEMA           = "financial_data"
-AGENT_ENDPOINT   = "databank-ai-advisor"   # From Module 07
+AGENT_ENDPOINT   = "test-ai-advisor"   # From Module 07
 FOUNDATION_MODEL = "gemma-3-12b"  # Used as judge
 EXPERIMENT_NAME  = f"/Users/{user}/databank-ai-lab/databank-agent-evaluation"
 
+
+from databricks.sdk import WorkspaceClient
 
 def get_superagent_endpoint_name(superagent_name):
     _w = WorkspaceClient()

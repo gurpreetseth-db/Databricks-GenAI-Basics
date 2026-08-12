@@ -3,8 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-# DBTITLE 1,Restart Python
-dbutils.library.restartPython()
+# DBTITLE 1,Run Pre-Requisites
+# MAGIC %run ./00_setup_prerequisites
 
 # COMMAND ----------
 
@@ -51,28 +51,11 @@ dbutils.library.restartPython()
 # CONFIGURATION
 # ================================================================
 
-# Get logged-in user information
-# If running this lab via Partner Academy Vocarium 
-
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-# Extract username before '@' and remove special characters
-import re
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
-
-if "labuser" in username_clean:
-    CATALOG = username_clean
-else:
-    CATALOG = "databank_lab"
-
-SCHEMA        = "financial_data"
-VOLUME_PATH   = f"/Volumes/{CATALOG}/{SCHEMA}/documents"
-
 # Vector Search endpoint — auto-select an available endpoint (same logic as Module 00)
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.vectorsearch import EndpointStatusState
 w = WorkspaceClient()
-_preferred = "databank-vs-endpoint"
+_preferred = AI_VECTOR_SEARCH_ENDPOINT
 try:
     _ep = w.vector_search_endpoints.get_endpoint(endpoint_name=_preferred)
     VS_ENDPOINT = _preferred
@@ -81,15 +64,14 @@ except Exception:
         ep.name for ep in w.vector_search_endpoints.list_endpoints()
         if ep.endpoint_status and ep.endpoint_status.state == EndpointStatusState.ONLINE
     ]
-    # Use the designated shared endpoint for this workspace
-    VS_ENDPOINT = "one-env-shared-endpoint-10"
+# Use the designated shared endpoint for this workspace
+
 VS_INDEX_NAME = f"{CATALOG}.{SCHEMA}.product_docs_index"
 SOURCE_TABLE  = f"{CATALOG}.{SCHEMA}.product_docs_chunks"
-EMBED_MODEL   = "databricks-gte-large-en"  # 1024-dim, 8k context, hosted by Databricks
 
-print(f"✅ VS Endpoint : {VS_ENDPOINT}")
+print(f"✅ VS Endpoint : {AI_VECTOR_SEARCH_ENDPOINT}")
 print(f"📄 VS Index     : {VS_INDEX_NAME}")
-print(f"📐 Embed Model  : {EMBED_MODEL}")
+print(f"📐 Embed Model  : {EMBEDDING_MODEL}")
 
 # COMMAND ----------
 
@@ -216,36 +198,36 @@ from databricks.vector_search.client import VectorSearchClient
 
 # Verify the endpoint created in Module 00 is ready
 try:
-    ep = w.vector_search_endpoints.get_endpoint(endpoint_name=VS_ENDPOINT)
-    print(f"✅ VS endpoint '{VS_ENDPOINT}' confirmed ready")
+    ep = w.vector_search_endpoints.get_endpoint(endpoint_name=AI_VECTOR_SEARCH_ENDPOINT)
+    print(f"✅ VS endpoint '{AI_VECTOR_SEARCH_ENDPOINT}' confirmed ready")
 except Exception as e:
-    print(f"⚠️  Could not verify endpoint '{VS_ENDPOINT}' via SDK (may lack get permission): {e}")
+    print(f"⚠️  Could not verify endpoint '{AI_VECTOR_SEARCH_ENDPOINT}' via SDK (may lack get permission): {e}")
     print("   Continuing — will attempt index operations via VectorSearchClient...")
 
 vsc = VectorSearchClient()
 
 # Delete existing index if it exists (for re-runs)
 try:
-    vsc.delete_index(endpoint_name=VS_ENDPOINT, index_name=VS_INDEX_NAME)
+    vsc.delete_index(endpoint_name=AI_VECTOR_SEARCH_ENDPOINT, index_name=VS_INDEX_NAME)
     print(f"🗑️  Deleted existing index: {VS_INDEX_NAME}")
 except Exception:
     pass  # Index did not exist
 
 print(f"🔧 Creating Vector Search Index: {VS_INDEX_NAME}")
-print(f"   Endpoint  : {VS_ENDPOINT}")
+print(f"   Endpoint  : {AI_VECTOR_SEARCH_ENDPOINT}")
 print(f"   Source    : {SOURCE_TABLE}")
-print(f"   Embedding : {EMBED_MODEL}")
+print(f"   Embedding : {EMBEDDING_MODEL}")
 print("   This will take 2-4 minutes...")
 
 # Create Delta Sync index with managed embeddings
 index = vsc.create_delta_sync_index_and_wait(
-    endpoint_name=VS_ENDPOINT,
+    endpoint_name=AI_VECTOR_SEARCH_ENDPOINT,
     source_table_name=SOURCE_TABLE,
     index_name=VS_INDEX_NAME,
     pipeline_type="TRIGGERED",
     primary_key="chunk_id",
     embedding_source_column="chunk_text",
-    embedding_model_endpoint_name=EMBED_MODEL
+    embedding_model_endpoint_name=EMBEDDING_MODEL
 )
 
 print(f"\n✅ Vector Search Index ready: {VS_INDEX_NAME}")
@@ -255,7 +237,7 @@ print(f"   Status: {index.describe().get('status', {}).get('ready_for_query', 'u
 
 # DBTITLE 1,Step 3 — Test Semantic Search
 # Connect to the index for querying
-index = vsc.get_index(endpoint_name=VS_ENDPOINT, index_name=VS_INDEX_NAME)
+index = vsc.get_index(endpoint_name=AI_VECTOR_SEARCH_ENDPOINT, index_name=VS_INDEX_NAME)
 
 def search_docs(query: str, num_results: int = 3) -> None:
     """
@@ -287,13 +269,13 @@ search_docs("What is the difference between a Cash ISA and a Stocks and Shares I
 
 # DBTITLE 1,Step 4 — Verify Index
 # Verify the index is ready for queries
-index_info = vsc.get_index(endpoint_name=VS_ENDPOINT, index_name=VS_INDEX_NAME)
+index_info = vsc.get_index(endpoint_name=AI_VECTOR_SEARCH_ENDPOINT, index_name=VS_INDEX_NAME)
 status = index_info.describe()
 
 print(f"📊 Index verification: {VS_INDEX_NAME}")
 print(f"   Ready for query : {status.get('status', {}).get('ready_for_query', 'unknown')}")
 print(f"   Vectors indexed : {status.get('status', {}).get('indexed_row_count', 'unknown')}")
-print(f"   Endpoint        : {VS_ENDPOINT}")
+print(f"   Endpoint        : {AI_VECTOR_SEARCH_ENDPOINT}")
 print(f"   Source table    : {SOURCE_TABLE}")
 print(f"\n✅ Vector Search index is ready to use in Modules 07 and 08.")
 

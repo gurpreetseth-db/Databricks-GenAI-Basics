@@ -3,7 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-
+# DBTITLE 1,Run Pre-Requisities
+# MAGIC %run ./00_setup_prerequisites
 
 # COMMAND ----------
 
@@ -50,19 +51,7 @@
 # Get logged-in user information
 # If running this lab via Partner Academy Vocarium 
 
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-# Extract username before '@' and remove special characters
-import re
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
-
-if "labuser" in username_clean:
-    CATALOG = username_clean
-else:
-    CATALOG = "databank_lab"
-    
-SCHEMA       = "financial_data"
-GENIE_NAME   = "DataBank Financial Advisor"
+GENIE_NAME   = f"{username_clean}_DataBank Financial Advisor"
 
 TABLES = [
     f"{CATALOG}.{SCHEMA}.customers",
@@ -301,7 +290,22 @@ print("Complete Option A (UI) first, then note your Genie Space ID for Module 07
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Test Genie Queries via API
+# DBTITLE 1,Step 3a - Fetch Genie_Space_ID
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient()
+genie_space_id = None
+existing_spaces = w.api_client.do("GET", "/api/2.0/genie/spaces")
+for space in existing_spaces.get("spaces", []):
+    if space.get("title") == GENIE_NAME:
+        genie_space_id = space.get("space_id")
+        break
+
+print(f"Genie Space ID for '{GENIE_NAME}': {genie_space_id}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Step 3b — Test Genie Queries via API
 # ============================================================
 # After creating the Genie Space (Option A or B),
 # replace GENIE_SPACE_ID with your actual space ID.
@@ -309,7 +313,7 @@ print("Complete Option A (UI) first, then note your Genie Space ID for Module 07
 #   https://workspace.azuredatabricks.net/#genie/<SPACE_ID>
 # ============================================================
 
-GENIE_SPACE_ID = genie_space_id # "01f17b4161221becbadc20a41938d27a"  # <-- FILL THIS IN after creating the space
+GENIE_SPACE_ID = genie_space_id 
 
 if not GENIE_SPACE_ID:
     print("⚠️ GENIE_SPACE_ID is empty.")

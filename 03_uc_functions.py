@@ -3,10 +3,6 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-
-
-# COMMAND ----------
-
 # DBTITLE 1,Module 03 — Welcome
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Module 03: Unity Catalog Functions
@@ -39,38 +35,8 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration
-# ================================================================
-# CONFIGURATION
-# ================================================================
-
-# Get logged-in user information
-# If running this lab via Partner Academy Vocarium 
-
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-# Extract username before '@' and remove special characters
-import re
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
-
-if "labuser" in username_clean:
-    CATALOG = username_clean
-else:
-    CATALOG = "databank_lab"
-
-
-SCHEMA  = "financial_data"
-
-from databricks.sdk import WorkspaceClient
-w = WorkspaceClient()
-
-print(f"✅ Functions will be registered in: {CATALOG}.{SCHEMA}")
-print(f"   Workspace: {w.config.host}")
-
-# Verify the source tables exist
-for tbl in ["customers", "accounts", "transactions"]:
-    count = spark.table(f"{CATALOG}.{SCHEMA}.{tbl}").count()
-    print(f"   ✓ {tbl}: {count:,} rows")
+# DBTITLE 1,Run Pre-Requisites
+# MAGIC %run ./00_setup_prerequisites
 
 # COMMAND ----------
 
@@ -91,36 +57,38 @@ for tbl in ["customers", "accounts", "transactions"]:
 # COMMAND ----------
 
 # DBTITLE 1,Step 1 — Create calculate_customer_risk Function
-# MAGIC %sql
-# MAGIC -- Drop and recreate for idempotency
-# MAGIC DROP FUNCTION IF EXISTS databank_lab.financial_data.calculate_customer_risk;
-# MAGIC
-# MAGIC CREATE OR REPLACE FUNCTION databank_lab.financial_data.calculate_customer_risk(
-# MAGIC   customer_id STRING COMMENT 'The DataBank customer ID (e.g. CUST-0001)'
-# MAGIC )
-# MAGIC RETURNS INT
-# MAGIC COMMENT 'Calculate a 0-100 risk score for a customer based on age, income, and stated risk profile.
-# MAGIC Higher score = higher risk tolerance. Conservative ~ 20-40, Moderate ~ 40-65, Aggressive ~ 65-90.'
-# MAGIC LANGUAGE SQL
-# MAGIC RETURN (
-# MAGIC   SELECT
-# MAGIC     MAX(CAST(
-# MAGIC       CASE risk_profile
-# MAGIC         WHEN 'Conservative' THEN 20
-# MAGIC         WHEN 'Moderate'     THEN 50
-# MAGIC         WHEN 'Aggressive'   THEN 75
-# MAGIC         ELSE                     40
-# MAGIC       END
-# MAGIC       -- Income adjustment: +/- 10 points based on income vs median
-# MAGIC       + LEAST(10, GREATEST(-10,
-# MAGIC           CAST((annual_income_gbp - 37000) / 8000 AS INT)
-# MAGIC         ))
-# MAGIC       -- Age adjustment: reduce score slightly for customers over 60
-# MAGIC       - CASE WHEN age > 60 THEN 5 ELSE 0 END
-# MAGIC     AS INT)) AS risk_score
-# MAGIC   FROM databank_lab.financial_data.customers
-# MAGIC   WHERE customer_id = calculate_customer_risk.customer_id
-# MAGIC );
+# Drop and recreate for idempotency
+spark.sql(f"DROP FUNCTION IF EXISTS {CATALOG}.{SCHEMA}.calculate_customer_risk")
+
+spark.sql(f"""
+CREATE OR REPLACE FUNCTION {CATALOG}.{SCHEMA}.calculate_customer_risk(
+  customer_id STRING COMMENT 'The DataBank customer ID (e.g. CUST-0001)'
+)
+RETURNS INT
+COMMENT 'Calculate a 0-100 risk score for a customer based on age, income, and stated risk profile.
+Higher score = higher risk tolerance. Conservative ~ 20-40, Moderate ~ 40-65, Aggressive ~ 65-90.'
+LANGUAGE SQL
+RETURN (
+  SELECT
+    MAX(CAST(
+      CASE risk_profile
+        WHEN 'Conservative' THEN 20
+        WHEN 'Moderate'     THEN 50
+        WHEN 'Aggressive'   THEN 75
+        ELSE                     40
+      END
+      -- Income adjustment: +/- 10 points based on income vs median
+      + LEAST(10, GREATEST(-10,
+          CAST((annual_income_gbp - 37000) / 8000 AS INT)
+        ))
+      -- Age adjustment: reduce score slightly for customers over 60
+      - CASE WHEN age > 60 THEN 5 ELSE 0 END
+    AS INT)) AS risk_score
+  FROM databank_lab.financial_data.customers
+  WHERE customer_id = calculate_customer_risk.customer_id
+)""")
+
+print(f"✅ calculate_customer_risk function created")
 
 # COMMAND ----------
 
@@ -242,60 +210,62 @@ print("\n✅ get_portfolio_summary is working")
 # COMMAND ----------
 
 # DBTITLE 1,Step 3 — Create flag_suspicious_transactions Function
-# MAGIC %sql
-# MAGIC DROP FUNCTION IF EXISTS databank_lab.financial_data.flag_suspicious_transactions;
-# MAGIC
-# MAGIC CREATE OR REPLACE FUNCTION databank_lab.financial_data.flag_suspicious_transactions(
-# MAGIC   customer_id  STRING  COMMENT 'The DataBank customer ID to check (e.g. CUST-0001)',
-# MAGIC   lookback_days INT    COMMENT 'Number of days to look back (default 90)'
-# MAGIC )
-# MAGIC RETURNS STRING
-# MAGIC COMMENT 'Returns a formatted text summary of suspicious or fraudulent transactions for a customer in the last N days. Returns a clear message if no suspicious activity is found.'
-# MAGIC LANGUAGE SQL
-# MAGIC RETURN (
-# MAGIC   WITH suspicious AS (
-# MAGIC     SELECT
-# MAGIC       txn_id,
-# MAGIC       txn_date,
-# MAGIC       amount_gbp,
-# MAGIC       merchant,
-# MAGIC       category,
-# MAGIC       channel,
-# MAGIC       status,
-# MAGIC       CASE
-# MAGIC         WHEN is_fraud           THEN 'FRAUD FLAGGED'
-# MAGIC         WHEN amount_gbp > 1000  THEN 'LARGE AMOUNT'
-# MAGIC         ELSE                         'ANOMALY'
-# MAGIC       END AS alert_type
-# MAGIC     FROM databank_lab.financial_data.transactions
-# MAGIC     WHERE customer_id  = flag_suspicious_transactions.customer_id
-# MAGIC       AND txn_date    >= DATE_SUB(CURRENT_DATE(), lookback_days)
-# MAGIC       AND (is_fraud = true OR amount_gbp > 1000)
-# MAGIC     ORDER BY txn_date DESC
-# MAGIC     LIMIT 10
-# MAGIC   )
-# MAGIC   SELECT
-# MAGIC     CASE
-# MAGIC       WHEN COUNT(*) = 0
-# MAGIC         THEN CONCAT('No suspicious transactions found for customer ', customer_id,
-# MAGIC                     ' in the last ', lookback_days, ' days. Account appears normal.')
-# MAGIC       ELSE
-# MAGIC         CONCAT(
-# MAGIC           'SUSPICIOUS ACTIVITY ALERT for ', customer_id, ':\n',
-# MAGIC           'Found ', COUNT(*), ' suspicious transaction(s) in last ', lookback_days, ' days:\n\n',
-# MAGIC           ARRAY_JOIN(
-# MAGIC             COLLECT_LIST(
-# MAGIC               CONCAT(
-# MAGIC                 '  ⚠ ', txn_id, ' | ', txn_date, ' | £', FORMAT_NUMBER(amount_gbp, 2),
-# MAGIC                 ' | ', merchant, ' | ', alert_type
-# MAGIC               )
-# MAGIC             ), '\n'
-# MAGIC           ),
-# MAGIC           '\n\nAction: Please review these transactions with the customer immediately.'
-# MAGIC         )
-# MAGIC     END AS fraud_report
-# MAGIC   FROM suspicious
-# MAGIC );
+spark.sql(f"DROP FUNCTION IF EXISTS {CATALOG}.{SCHEMA}.flag_suspicious_transactions")
+
+spark.sql(f"""
+CREATE OR REPLACE FUNCTION {CATALOG}.{SCHEMA}.flag_suspicious_transactions(
+  customer_id  STRING  COMMENT 'The DataBank customer ID to check (e.g. CUST-0001)',
+  lookback_days INT    COMMENT 'Number of days to look back (default 90)'
+)
+RETURNS STRING
+COMMENT 'Returns a formatted text summary of suspicious or fraudulent transactions for a customer in the last N days. Returns a clear message if no suspicious activity is found.'
+LANGUAGE SQL
+RETURN (
+  WITH suspicious AS (
+    SELECT
+      txn_id,
+      txn_date,
+      amount_gbp,
+      merchant,
+      category,
+      channel,
+      status,
+      CASE
+        WHEN is_fraud           THEN 'FRAUD FLAGGED'
+        WHEN amount_gbp > 1000  THEN 'LARGE AMOUNT'
+        ELSE                         'ANOMALY'
+      END AS alert_type
+    FROM databank_lab.financial_data.transactions
+    WHERE customer_id  = flag_suspicious_transactions.customer_id
+      AND txn_date    >= DATE_SUB(CURRENT_DATE(), lookback_days)
+      AND (is_fraud = true OR amount_gbp > 1000)
+    ORDER BY txn_date DESC
+    LIMIT 10
+  )
+  SELECT
+    CASE
+      WHEN COUNT(*) = 0
+        THEN CONCAT('No suspicious transactions found for customer ', customer_id,
+                    ' in the last ', lookback_days, ' days. Account appears normal.')
+      ELSE
+        CONCAT(
+          'SUSPICIOUS ACTIVITY ALERT for ', customer_id, ':\n',
+          'Found ', COUNT(*), ' suspicious transaction(s) in last ', lookback_days, ' days:\n\n',
+          ARRAY_JOIN(
+            COLLECT_LIST(
+              CONCAT(
+                '  ⚠ ', txn_id, ' | ', txn_date, ' | £', FORMAT_NUMBER(amount_gbp, 2),
+                ' | ', merchant, ' | ', alert_type
+              )
+            ), '\n'
+          ),
+          '\n\nAction: Please review these transactions with the customer immediately.'
+        )
+    END AS fraud_report
+  FROM suspicious
+)""")
+
+print(f"✅ flag_suspicious_transactions function created")
 
 # COMMAND ----------
 

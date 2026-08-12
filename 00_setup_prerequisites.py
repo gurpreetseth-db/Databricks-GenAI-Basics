@@ -215,6 +215,31 @@ print(f"   Workspace   : {w.config.host}")
 
 # COMMAND ----------
 
+# DBTITLE 1,Step 6 - Create ML Flow Experiment
+# MLflow tracks your agent's performance. This creates an experiment where traces and evaluation metrics will be logged.
+
+import mlflow
+
+mlflow.set_tracking_uri("databricks")
+experiment_name = f"/Users/{user}/{username_clean}_databank_ai_lab"
+
+try:
+    experiment = mlflow.get_experiment_by_name(experiment_name)
+    if experiment and experiment.lifecycle_stage == "active":
+        experiment_id = experiment.experiment_id
+        print(f"✅ MLflow experiment already exists: {experiment_name} (ID: {experiment_id})")
+    else:
+        experiment_id = mlflow.create_experiment(experiment_name)
+        print(f"✅ MLflow experiment created: {experiment_name} (ID: {experiment_id})")
+except Exception:
+    experiment_id = mlflow.create_experiment(experiment_name)
+    print(f"✅ MLflow experiment created: {experiment_name} (ID: {experiment_id})")
+
+mlflow.set_experiment(experiment_name)
+
+# COMMAND ----------
+
+# DBTITLE 1,Setup Completed
 # ================================================================
 # RETURN IF ALL SUCCESSFUL
 # ================================================================
@@ -229,6 +254,7 @@ print(f"🤖  Agent    : {AGENT_ENDPOINT} ✅")
 print(f"🤖  AI GW    : {AI_GW_ROUTE} ✅")
 print(f"🔍  AI/Vector Search Endpoint : {AI_VECTOR_SEARCH_ENDPOINT} ✅")
 print(f"🔍  VS Index : {VS_INDEX_NAME} ✅")
+print(f"🤖 Experiment : {experiment_name} ✅")
 
 
 

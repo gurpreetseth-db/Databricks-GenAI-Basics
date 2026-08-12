@@ -38,6 +38,7 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Run Pre-requisites
 # MAGIC %run ./00_setup_prerequisites
 
 # COMMAND ----------
@@ -125,127 +126,95 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Option 2 - Via Code
-from databricks.sdk import WorkspaceClient
-from databricks.sdk.service import serving
-from openai import OpenAI
-import json
+# DBTITLE 1,Option 2 - Via Code - Gateway V1
+#from databricks.sdk import WorkspaceClient
+#from databricks.sdk.service import serving
+#from openai import OpenAI
+#import json
 
-w = WorkspaceClient()
+#w = WorkspaceClient()
 
-# Create the AI Gateway endpoint programmatically
-# This creates a pay-per-token AI Gateway route for a Foundation Model
-# with rate limiting and usage tracking.
-from databricks.sdk.service.serving import (
-    EndpointCoreConfigInput,
-    ServedEntityInput,
-    ExternalModel,
-    ExternalModelProvider,
-    DatabricksModelServingConfig,
-    AiGatewayConfig,
-    AiGatewayRateLimit,
-    AiGatewayRateLimitRenewalPeriod,
-    AiGatewayRateLimitKey,
-    AiGatewayUsageTrackingConfig,
-)
+## Create the AI Gateway endpoint programmatically
+## This creates a pay-per-token AI Gateway route for a Foundation Model
+## with rate limiting and usage tracking.
 
-from databricks.sdk import WorkspaceClient
-w = WorkspaceClient()
+#from databricks.sdk.service.serving import (
+#    EndpointCoreConfigInput,
+#    ServedEntityInput,
+#    ExternalModel,
+#    ExternalModelProvider,
+#    DatabricksModelServingConfig,
+#    AiGatewayConfig,
+#    AiGatewayRateLimit,
+#    AiGatewayRateLimitRenewalPeriod,
+#    AiGatewayRateLimitKey,
+#    AiGatewayUsageTrackingConfig,
+#)
 
-print(f"🚀 Creating AI Gateway route: '{AI_GW_ROUTE}'...")
-print(f"   Foundation Model: {FOUNDATION_MODEL}")
+#from databricks.sdk import WorkspaceClient
+#w = WorkspaceClient()
 
-# Get a long-lived PAT for the endpoint proxy
-pat_token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+#print(f"🚀 Creating AI Gateway route: '{AI_GW_ROUTE}'...")
+#print(f"   Foundation Model: {FOUNDATION_MODEL}")
 
-try:
-    existing = w.serving_endpoints.get(name=AI_GW_ROUTE)
-    # Verify the proxy actually works (token may be missing/expired)
-    from openai import OpenAI as _OAI
-    _client = _OAI(api_key=pat_token, base_url=f"{w.config.host}/serving-endpoints")
-    _test = _client.chat.completions.create(model=AI_GW_ROUTE, messages=[{"role": "user", "content": "test"}], max_tokens=5)
-    print(f"✅ AI Gateway '{AI_GW_ROUTE}' exists and proxy is working!")
-    if existing.ai_gateway:
-        print(f"   Rate limits: {len(existing.ai_gateway.rate_limits or [])} configured")
-        print(f"   Usage tracking: {existing.ai_gateway.usage_tracking_config.enabled if existing.ai_gateway.usage_tracking_config else False}")
-    print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
-except Exception as e:
-    # Either endpoint doesn't exist or proxy is broken — (re)create with valid PAT
-    print(f"⚠️  Gateway needs (re)creation: {type(e).__name__}")
-    try:
-        w.serving_endpoints.delete(name=AI_GW_ROUTE)
-        import time; time.sleep(5)
-        print("   Deleted broken endpoint.")
-    except Exception:
-        pass
+## Get a long-lived PAT for the endpoint proxy
+#pat_token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
 
-    endpoint = w.serving_endpoints.create(
-        name=AI_GW_ROUTE,
-        config=EndpointCoreConfigInput(
-            served_entities=[
-                ServedEntityInput(
-                    external_model=ExternalModel(
-                        provider=ExternalModelProvider.DATABRICKS_MODEL_SERVING,
-                        name=FOUNDATION_MODEL,
-                        task="llm/v1/chat",
-                        databricks_model_serving_config=DatabricksModelServingConfig(
-                            databricks_workspace_url=w.config.host,
-                            databricks_api_token_plaintext=pat_token,
-                        ),
-                    ),
-                )
-            ]
-        ),
-        ai_gateway=AiGatewayConfig(
-            rate_limits=[
-                AiGatewayRateLimit(
-                    calls=100,
-                    renewal_period=AiGatewayRateLimitRenewalPeriod.MINUTE,
-                    key=AiGatewayRateLimitKey.USER,
-                )
-            ],
-            usage_tracking_config=AiGatewayUsageTrackingConfig(enabled=True),
-        ),
-    )
+#try:
+#    existing = w.serving_endpoints.get(name=AI_GW_ROUTE)
+    ## Verify the proxy actually works (token may be missing/expired)
+#    from openai import OpenAI as _OAI
+#    _client = _OAI(api_key=pat_token, base_url=f"{w.config.host}/serving-endpoints")
+#    _test = _client.chat.completions.create(model=AI_GW_ROUTE, messages=[{"role": "user", "content": "test"}], max_tokens=5)
+#    print(f"✅ AI Gateway '{AI_GW_ROUTE}' exists and proxy is working!")
+#    if existing.ai_gateway:
+#        print(f"   Rate limits: {len(existing.ai_gateway.rate_limits or [])} configured")
+#        print(f"   Usage tracking: {existing.ai_gateway.usage_tracking_config.enabled if existing.ai_gateway.usage_tracking_config else False}")
+#    print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
+#except Exception as e:
+    ## Either endpoint doesn't exist or proxy is broken — (re)create with valid PAT
+#    print(f"⚠️  Gateway needs (re)creation: {type(e).__name__}")
+#    try:
+#        w.serving_endpoints.delete(name=AI_GW_ROUTE)
+#        import time; time.sleep(5)
+#        print("   Deleted broken endpoint.")
+#    except Exception:
+#        pass
 
-    print(f"✅ AI Gateway '{AI_GW_ROUTE}' created successfully!")
-    print(f"   Rate limit: 100 requests/min/user")
-    print(f"   Usage tracking: Enabled")
-    print(f"   Guardrails: Add via UI (AI/ML → AI Gateway → Policies)")
-    print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
+#    endpoint = w.serving_endpoints.create(
+#        name=AI_GW_ROUTE,
+#        config=EndpointCoreConfigInput(
+#            served_entities=[
+#                ServedEntityInput(
+#                    external_model=ExternalModel(
+#                        provider=ExternalModelProvider.DATABRICKS_MODEL_SERVING,
+#                        name=FOUNDATION_MODEL,
+#                        task="llm/v1/chat",
+#                        databricks_model_serving_config=DatabricksModelServingConfig(
+#                            databricks_workspace_url=w.config.host,
+#                            databricks_api_token_plaintext=pat_token,
+#                        ),
+#                    ),
+#                )
+#            ]
+#        ),
+#        ai_gateway=AiGatewayConfig(
+#            rate_limits=[
+#                AiGatewayRateLimit(
+#                    calls=100,
+#                    renewal_period=AiGatewayRateLimitRenewalPeriod.MINUTE,
+#                    key=AiGatewayRateLimitKey.USER,
+#                )
+#            ],
+#            usage_tracking_config=AiGatewayUsageTrackingConfig(enabled=True),
+#        ),
+#    )
 
-# COMMAND ----------
-
-# DBTITLE 1,Step 2 — Inspect Gateway Configuration
-# Retrieve and display the AI Gateway configuration
-try:
-    endpoint = w.serving_endpoints.get(name=AI_GW_ROUTE)
-except Exception as e:
-    print(f"⚠️  Endpoint '{AI_GW_ROUTE}' not found. Please create it via the UI (Option A above) first.")
-    print(f"   Error: {e}")
-    endpoint = None
-
-if endpoint and endpoint.ai_gateway:
-    gw = endpoint.ai_gateway
-    print(f"📊 AI Gateway Configuration: {AI_GW_ROUTE}")
-    print(f"   Endpoint state : {endpoint.state.ready if endpoint.state else 'READY'}")
-    print()
-
-    if gw.rate_limits:
-        for rl in gw.rate_limits:
-            print(f"   Rate limit     : {rl.calls} calls per {rl.renewal_period} per {rl.key}")
-
-    if gw.usage_tracking_config:
-        print(f"   Usage tracking : {'Enabled' if gw.usage_tracking_config.enabled else 'Disabled'}")
-
-    if gw.guardrails:
-        print(f"   PII guardrail  : Input={gw.guardrails.input.pii.behavior if gw.guardrails.input and gw.guardrails.input.pii else 'OFF'}")
-        print(f"   Safety guard   : Input={gw.guardrails.input.safety if gw.guardrails.input else 'OFF'}, Output={gw.guardrails.output.safety if gw.guardrails.output else 'OFF'}")
-elif endpoint:
-    print(f"✅ Endpoint '{AI_GW_ROUTE}' is live (AI Gateway config not shown for legacy routes)")
-
-if endpoint:
-    print(f"\n🔗 Invocation URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
+#    print(f"✅ AI Gateway '{AI_GW_ROUTE}' created successfully!")
+#    print(f"   Rate limit: 100 requests/min/user")
+#    print(f"   Usage tracking: Enabled")
+#    print(f"   Guardrails: Add via UI (AI/ML → AI Gateway → Policies)")
+#    print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
 
 # COMMAND ----------
 
@@ -266,7 +235,7 @@ if endpoint:
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Call Gateway with Financial Questions
+# DBTITLE 1,Step 2 — Call Gateway with Financial Questions
 # ================================================================
 # TEST: LLM with Financial Questions
 # ================================================================
@@ -335,7 +304,7 @@ print(f"\n✅ LLM test complete (via {MODEL_TO_USE})")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 4 — Test PII Guardrail
+# DBTITLE 1,Step 3 — Test PII Guardrail
 # Demonstrate the PII guardrail: the gateway should BLOCK or MASK requests
 # containing sensitive personal data (SSN, credit card numbers, etc.)
 

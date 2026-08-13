@@ -3,7 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-
+# DBTITLE 1,Run Pre-Requisites
+# MAGIC %run ./00_setup_prerequisites
 
 # COMMAND ----------
 

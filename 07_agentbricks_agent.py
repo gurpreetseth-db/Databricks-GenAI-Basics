@@ -3,7 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-
+# DBTITLE 1,Run Pre-Requisites
+# MAGIC %run ./00_setup_prerequisites
 
 # COMMAND ----------
 
@@ -52,28 +53,23 @@
 # CONFIGURATION — FILL IN YOUR IDs FROM EARLIER MODULES
 # ================================================================
 
-# Get logged-in user information
-# If running this lab via Partner Academy Vocarium 
-
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-# Extract username before '@' and remove special characters
-import re
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
-
-if "labuser" in username_clean:
-    CATALOG = username_clean
-else:
-    CATALOG = "databank_lab"
-    
-SCHEMA        = "financial_data"
-VOLUME_PATH   = f"/Volumes/{CATALOG}/{SCHEMA}/documents"
-
 # From Module 05: your Genie Space ID (from URL: #genie/<SPACE_ID>)
-GENIE_SPACE_ID = ""  # <-- FILL THIS IN
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient()
+GENIE_SPACE_ID = None
+existing_spaces = w.api_client.do("GET", "/api/2.0/genie/spaces")
+for space in existing_spaces.get("spaces", []):
+    if space.get("title") == GENIE_NAME:
+        GENIE_SPACE_ID = space.get("space_id")
+        break
+
+print(f"Genie Space ID for '{GENIE_NAME}': {GENIE_SPACE_ID}")
+
+###############################################################
 
 # Knowledge Agent configuration
-KA_NAME       = "DataBank-Document-Assistant"
+KA_NAME       = f"{username_clean}_DataBank-Document-Assistant"
 DESCRIPTION   = ("DataBank product and compliance document assistant. Answers questions about savings, loans, " 
                    "investments insurance, credit cards, FAQs and term & conditions."
                 )
@@ -141,7 +137,7 @@ print(" ================================== ")
 print(" SUPERVISOR ASSISTANT CONFIGURATION ")
 print(" ================================== ")
 
-SUPERAGENT_NAME      = "DataBank-AI-Advisor"
+SUPERAGENT_NAME      = f"{username_clean}_DataBank-AI-Advisor"
 SUPERAGENT_INSTRUCTIONS = (
  
     "- Use Knowledge Assistant to "

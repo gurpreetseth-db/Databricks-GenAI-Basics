@@ -1,8 +1,4 @@
 # Databricks notebook source
-
-
-# COMMAND ----------
-
 # DBTITLE 1,Module 08 — Welcome
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Module 08: Databricks Apps (Gradio)
@@ -56,7 +52,7 @@ import time
 
 user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
 
-AGENT_ENDPOINT = "databank-ai-advisor"  # From Module 07
+AGENT_ENDPOINT = "gurpreetsethi_DataBank-AI-Advisor"  # From Module 07
 APP_NAME       = "databank-ai-advisor-app"
 APP_DIR        = f"/Workspace/Users/{user}/databank-ai-lab/app"
 

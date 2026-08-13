@@ -43,6 +43,11 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Run Pre-Requisites
+# MAGIC %run ./00_setup_prerequisites
+
+# COMMAND ----------
+
 # DBTITLE 1,Step 0 — Configuration
 # ================================================================
 # CONFIGURATION
@@ -69,7 +74,7 @@ def get_superagent_endpoint_name(superagent_name):
     if not endpoint_name:
         term = normalise(superagent_name)
         endpoint_name = next((ep.name for ep in all_eps if term in normalise(ep.name)), None)
-    
+  
     # 3. AgentBricks fallback — supervisor agent endpoints are always named mas-<uuid>-endpoint
     if not endpoint_name:
         mas_eps = [ep.name for ep in all_eps
@@ -108,7 +113,6 @@ import os
 os.makedirs(APP_DIR, exist_ok=True)
 
 app_py_content = '''
-
 import os
 import requests
 import gradio as gr
@@ -127,7 +131,6 @@ def _safe_parse(schema, defs=None):
 _gc_utils._json_schema_to_python_type = _safe_parse
 
 # Authentication: Databricks Apps auto-injects OAuth credentials via DATABRICKS_CLIENT_ID / SECRET.
-# cfg.token is None under OAuth — use cfg.authenticate() to get a fresh bearer token per request.
 cfg = Config()
 
 
@@ -137,18 +140,47 @@ def _get_headers():
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
-AGENT_ENDPOINT = os.getenv("AGENT_ENDPOINT_NAME", "mas-c6b6f9ff-endpoint")
+AGENT_ENDPOINT_NAME = os.getenv("AGENT_ENDPOINT_NAME", "__AGENT_ENDPOINT_PLACEHOLDER__")
+AI_GATEWAY_ENDPOINT = os.getenv("AI_GATEWAY_ENDPOINT", "__AIGATEWAY_ENDPOINT_PLACEHOLDER__")  # AI Gateway endpoint name
 
 
-def chat(message: str, history: list) -> str:
-    """
-    Send a message to the DataBank AI Advisor agent and return the response.
-    history: list of [user_message, assistant_message] pairs (Gradio format)
-    """
-    # AgentBricks endpoints require 'input' (not 'messages') — use requests directly
-    # to bypass the openai client's 'messages' validation.
-    # Note: omit 'system' role — AgentBricks supervisor already has its own instructions;
-    # passing a system message can result in an empty response from the endpoint.
+# ================================================================
+# AI GATEWAY MODE
+# When AI_GATEWAY_ENDPOINT is set, uses DatabricksOpenAI with
+# use_ai_gateway=True to govern LLM usage via Unity AI Gateway.
+# Ref: https://docs.databricks.com/aws/en/agents/custom-agents/author-agent
+# ================================================================
+_ai_gw_client = None
+if AI_GATEWAY_ENDPOINT:
+    try:
+        from databricks_openai import DatabricksOpenAI
+        _ai_gw_client = DatabricksOpenAI(use_ai_gateway=True)
+        print(f"\u2705 AI Gateway mode enabled: {AI_GATEWAY_ENDPOINT}")
+    except ImportError:
+        print("\u26a0\ufe0f  databricks-openai not installed — falling back to direct agent mode")
+
+
+def _chat_via_gateway(message: str, history: list) -> str:
+    """Call an LLM through the Databricks AI Gateway using DatabricksOpenAI."""
+    messages = []
+    for user_msg, assistant_msg in history:
+        messages.append({"role": "user", "content": user_msg})
+        messages.append({"role": "assistant", "content": assistant_msg})
+    messages.append({"role": "user", "content": message})
+
+    try:
+        response = _ai_gw_client.chat.completions.create(
+            model=AI_GATEWAY_ENDPOINT,
+            messages=messages,
+            max_tokens=2048
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"\u274c AI Gateway error: {e}"
+
+
+def _chat_via_agent(message: str, history: list) -> str:
+    """Call the AgentBricks supervisor endpoint directly."""
     input_messages = []
     for user_msg, assistant_msg in history:
         input_messages.append({"role": "user",      "content": user_msg})
@@ -164,18 +196,15 @@ def chat(message: str, history: list) -> str:
         )
         resp.raise_for_status()
     except requests.exceptions.HTTPError as e:
-        return f"❌ Endpoint error ({resp.status_code}): {resp.text[:300] or str(e)}"
+        return f"\u274c Endpoint error ({resp.status_code}): {resp.text[:300] or str(e)}"
     except Exception as e:
-        return f"❌ Request failed: {e}"
+        return f"\u274c Request failed: {e}"
 
     try:
         data = resp.json()
     except Exception:
-        return f"❌ Endpoint returned non-JSON (status {resp.status_code}): {resp.text[:300]}"
+        return f"\u274c Endpoint returned non-JSON (status {resp.status_code}): {resp.text[:300]}"
 
-    # Extract the final assistant text from the AgentBricks event stream.
-    # data["output"] is a list of events; the answer is in the last 'message'
-    # event with role 'assistant' and content type 'output_text'.
     answer = None
     output_events = data.get("output", [])
     if isinstance(output_events, list):
@@ -192,6 +221,13 @@ def chat(message: str, history: list) -> str:
     return answer
 
 
+def chat(message: str, history: list) -> str:
+    """Route to AI Gateway (if available) or direct agent endpoint."""
+    if _ai_gw_client and AI_GATEWAY_ENDPOINT:
+        return _chat_via_gateway(message, history)
+    return _chat_via_agent(message, history)
+
+
 # Gradio Chat Interface
 with gr.Blocks(
     title="DataBank AI Advisor",
@@ -200,21 +236,21 @@ with gr.Blocks(
 ) as demo:
 
     gr.Markdown("""
-    # 🏦 DataBank AI Advisor
+    # \U0001f3e6 DataBank AI Advisor
     **Your intelligent financial advisor assistant**
 
     Ask me about:
-    - 💼 Customer portfolios and account details
-    - 📊 Risk scores and investment suitability
-    - ⚠️ Suspicious transactions and fraud checks
-    - 📄 DataBank product features and eligibility
+    - \U0001f4bc Customer portfolios and account details
+    - \U0001f4ca Risk scores and investment suitability
+    - \u26a0\ufe0f Suspicious transactions and fraud checks
+    - \U0001f4c4 DataBank product features and eligibility
     """)
 
     chatbot = gr.Chatbot(
         label="DataBank AI Advisor Chat",
         height=500,
         show_label=True,
-        avatar_images=(None, "🏦")
+        avatar_images=(None, "\U0001f3e6")
     )
 
     with gr.Row():
@@ -223,15 +259,14 @@ with gr.Blocks(
             label="Your question",
             scale=4
         )
-        send_btn = gr.Button("🔍 Ask", variant="primary", scale=1)
+        send_btn = gr.Button("\U0001f50d Ask", variant="primary", scale=1)
 
-    # Example queries
     gr.Examples(
         examples=[
             "Give me a portfolio overview for CUST-0001",
             "Check for suspicious transactions on CUST-0042 in the last 90 days",
-            "What investment products are suitable for a conservative investor with £10,000?",
-            "A customer wants to consolidate £15,000 of debt. What loan options do we have?",
+            "What investment products are suitable for a conservative investor with 10,000?",
+            "A customer wants to consolidate 15,000 of debt. What loan options do we have?",
             "How many customers have an aggressive risk profile?"
         ],
         inputs=msg_box,
@@ -243,7 +278,6 @@ with gr.Blocks(
         "*DataBank AI Lab | Powered by Databricks AgentBricks, AI Gateway, and Vector Search*",
     )
 
-    # Wire up the chat
     def respond(message, history):
         bot_message = chat(message, history)
         history.append((message, bot_message))
@@ -255,17 +289,27 @@ with gr.Blocks(
 
 if __name__ == "__main__":
     demo.launch(server_port=int(os.getenv("DATABRICKS_APP_PORT", 8000)), show_api=False)
-
 '''
+
+# Inject the actual endpoint name into the template
+app_py_content = app_py_content.replace("__AGENT_ENDPOINT_PLACEHOLDER__", endpoint_name)
+
+# Inject the actual AI Gatway endpoint name into the template
+app_py_content = app_py_content.replace("__AIGATEWAY_ENDPOINT_PLACEHOLDER__", AI_GW_ROUTE)
+
 
 with open(f"{APP_DIR}/app.py", "w") as f:
     f.write(app_py_content)
 
-print(f"✅ app.py written to {APP_DIR}/app.py")
+print(f"\u2705 app.py written to {APP_DIR}/app.py")
 
 # COMMAND ----------
 
 # DBTITLE 1,Step 2 — Write app.yaml (App Configuration)
+# Set AI_GATEWAY_ENDPOINT to route through AI Gateway (with rate limits, guardrails, usage tracking)
+# Leave empty to use the direct agent endpoint (default)
+AI_GATEWAY_ENDPOINT_NAME = "databricks-gemma-3-12b"  # System FM endpoint with AI Gateway
+
 app_yaml_content = f'''# Databricks Apps configuration
 # Docs: https://docs.databricks.com/dev-tools/databricks-apps/
 
@@ -276,11 +320,17 @@ command:
 env:
   - name: AGENT_ENDPOINT_NAME
     value: {endpoint_name}
+  - name: AI_GATEWAY_ENDPOINT
+    value: {AI_GATEWAY_ENDPOINT_NAME}
 
 resources:
   - name: agent-serving-endpoint
     serving_endpoint:
-      name: {endpoint_name }
+      name: {endpoint_name}
+      permission: CAN_QUERY
+  - name: ai-gateway-endpoint
+    serving_endpoint:
+      name: {AI_GATEWAY_ENDPOINT_NAME}
       permission: CAN_QUERY
 '''
 
@@ -297,7 +347,8 @@ for fname in os.listdir(APP_DIR):
 # COMMAND ----------
 
 # DBTITLE 1,Step 3 - Create requirements.txt
-requirementtext = f'''databricks-openai'''
+requirementtext = f'''databricks-openai
+openai'''
 
 with open(f"{APP_DIR}/requirements.txt", "w") as f:
     f.write(requirementtext)

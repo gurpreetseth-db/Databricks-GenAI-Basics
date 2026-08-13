@@ -92,6 +92,9 @@ AGENT_ENDPOINT = f"{username_clean}_databank-ai-advisor"
 FOUNDATION_MODEL = "databricks-meta-llama-3-3-70b-instruct"
 EMBEDDING_MODEL  = "databricks-gte-large-en"
 
+# Genie Name
+GENIE_NAME   = f"{username_clean}_DataBank Financial Advisor"
+
 
 
 # COMMAND ----------

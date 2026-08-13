@@ -51,8 +51,6 @@
 # Get logged-in user information
 # If running this lab via Partner Academy Vocarium 
 
-GENIE_NAME   = f"{username_clean}_DataBank Financial Advisor"
-
 TABLES = [
     f"{CATALOG}.{SCHEMA}.customers",
     f"{CATALOG}.{SCHEMA}.accounts",

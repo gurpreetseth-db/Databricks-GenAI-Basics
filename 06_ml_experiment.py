@@ -45,29 +45,6 @@
 # COMMAND ----------
 
 # DBTITLE 1,Step 0 — Configuration & Imports
-# ================================================================
-# CONFIGURATION
-# ================================================================
-
-# Get logged-in user information
-# If running this lab via Partner Academy Vocarium 
-
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-# Extract username before '@' and remove special characters
-import re
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
-
-if "labuser" in username_clean:
-    CATALOG = username_clean
-else:
-    CATALOG = "databank_lab"
-
-
-SCHEMA           = "financial_data"
-FOUNDATION_MODEL = "gemma-3-12b"
-AI_GW_ROUTE      = "test_ai_gateway"
-EXPERIMENT_NAME  = f"/Users/{user}/databank-ai-lab/databank-prompt-experiments"
 
 # ================================================================
 # IMPORTS
@@ -80,24 +57,26 @@ from databricks.sdk import WorkspaceClient
 import time
 import json
 import logging
+import os
 
 # Suppress harmless Py4J security warning on Serverless compute
 logging.getLogger("mlflow.tracking.context.registry").setLevel(logging.ERROR)
 
 w = WorkspaceClient()
 
+LLM_Key = "REDACTED_DATABRICKS_PAT"
 # Use AI Gateway route (Module 02) or fall back to Foundation Models directly
 try:
-    w.serving_endpoints.get(name=AI_GW_ROUTE)
+    w.serving_endpoints.get(name=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}")
     # Verify the gateway actually works with a quick test call
-    _test_client = OpenAI(api_key=_token, base_url=f"{w.config.host}/serving-endpoints")
+    _test_client = OpenAI(api_key=LLM_Key, base_url=f"{w.config.host}/ai-gateway/mlflow/v1")
     _test_client.chat.completions.create(
-        model=AI_GW_ROUTE,
+        model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=5
     )
-    ACTIVE_MODEL = AI_GW_ROUTE
-    print(f"✅ Using AI Gateway route: {AI_GW_ROUTE}")
+    ACTIVE_MODEL = f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}"
+    print(f"✅ Using AI Gateway route: {CATALOG}.{SCHEMA}.{AI_GW_ROUTE}")
 except Exception as e:
     ACTIVE_MODEL = f"databricks-{FOUNDATION_MODEL}"
     print(f"⚠️  AI Gateway not usable ({type(e).__name__}), using Foundation Model: {ACTIVE_MODEL}")
@@ -109,7 +88,7 @@ client = OpenAI(
     base_url=f"{w.config.host}/serving-endpoints"
 )
 
-print(f"\n📈 MLflow Experiment: {EXPERIMENT_NAME}")
+print(f"\n📈 MLflow Experiment: {experiment_name}")
 
 # COMMAND ----------
 

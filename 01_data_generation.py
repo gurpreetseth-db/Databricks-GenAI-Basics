@@ -190,6 +190,11 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.products"))
 # COMMAND ----------
 
 # DBTITLE 1,Step 2 — Create Customers Table
+# --- Imports (required if Cell 4 hasn't been run) ---
+from pyspark.sql import functions as F
+from pyspark.sql.types import StringType, IntegerType, DoubleType
+import pandas as pd
+
 # --- Pandas UDFs for Faker data (UK financial context) ---
 
 @F.pandas_udf(StringType())
@@ -278,6 +283,8 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.customers").limit(5))
 # COMMAND ----------
 
 # DBTITLE 1,Step 3 — Create Accounts Table (FK join pattern)
+from pyspark.sql.window import Window
+
 # Accounts: 500 rows, one per customer, FK to both customers and products
 # Pattern: read master tables from Delta, add row index, join on index for FK assignment
 
@@ -344,7 +351,9 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.accounts").limit(5))
 # DBTITLE 1,Step 4 — Create Transactions Table
 # 10,000 banking transactions with realistic categories and a 2% fraud rate
 
+from pyspark.sql.types import BooleanType
 @F.pandas_udf(StringType())
+
 def fake_merchant(ids: pd.Series) -> pd.Series:
     from faker import Faker
     import random

@@ -79,9 +79,9 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Option A — UI Walkthrough
+# DBTITLE 1,UI Walkthrough
 # MAGIC %md
-# MAGIC ## 🖼️ Option A: Create via the Databricks UI
+# MAGIC ## 🖼️ Create via the Databricks UI
 # MAGIC
 # MAGIC Follow these steps in the Databricks workspace UI:
 # MAGIC
@@ -126,7 +126,249 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Option 2 - Via Code - Gateway V1
+# MAGIC %md
+# MAGIC ---
+# MAGIC ---
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC **Generate a Token** 
+# MAGIC
+# MAGIC To Query AI Gateway create a Token and make sure to select scope as **`ai_gateway`** and Replace it in **cell 11** for column **`Key`**
+# MAGIC
+# MAGIC ---
+# MAGIC ![](./img/Generate_Token.jpg)
+# MAGIC
+# MAGIC ---
+# MAGIC ---
+# MAGIC ![](./img/Generate_Token_Gateway_Specific.jpg)
+
+# COMMAND ----------
+
+# DBTITLE 1,Test the Gateway — Financial Questions
+# MAGIC %md
+# MAGIC ## 🧪 Test the AI Gateway
+# MAGIC
+# MAGIC Now we’ll call the AI Gateway route exactly like a regular OpenAI API, but through the managed gateway.
+# MAGIC
+# MAGIC **Key insight:** The URL is different — it points to the gateway route, not the Foundation Models API directly.
+# MAGIC
+# MAGIC | Direct FM API | Through AI Gateway |
+# MAGIC |---------------|--------------------|
+# MAGIC | `{host}/serving-endpoints/databricks-meta-llama-3-3-70b-instruct/invocations` | `{host}/serving-endpoints/databank-llm-route/invocations` |
+# MAGIC | No rate limits | 100 req/min/user |
+# MAGIC | No usage log | Logged to Delta table |
+# MAGIC | No PII guardrail | PII blocked automatically |
+
+# COMMAND ----------
+
+# DBTITLE 1,Step 2 — Call Gateway with Financial Questions
+# ================================================================
+# TEST: LLM with Financial Questions
+# ================================================================
+# This cell tests the LLM backend. If the AI Gateway route exists,
+# it calls through the gateway. Otherwise, it calls Foundation Models
+# directly to demonstrate the same financial Q&A capability.
+# ================================================================
+import os
+from openai import OpenAI
+
+LLM_Key = "dapi93a5ebe67c280ac2b4aadfec0a91462f"
+
+client = OpenAI(
+    api_key=LLM_Key,
+    base_url=f"{w.config.host}/ai-gateway/mlflow/v1"
+)
+
+# Try the AI Gateway route; fall back to Foundation Model if gateway proxy fails
+try:
+    _test = client.chat.completions.create(
+        model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
+        messages=[{"role": "user", "content": "test"}],
+        max_tokens=5
+    )
+    MODEL_TO_USE = f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}"
+    print(f"⚡ Using AI Gateway route: {CATALOG}.{SCHEMA}.{AI_GW_ROUTE}")
+    print(f"   Backing model: {FOUNDATION_MODEL}")
+except Exception as e:
+    # Use llama-3-3 directly
+    MODEL_TO_USE = "llama_v3_3_70b_instruct"
+    print(f"⚡ AI Gateway proxy unavailable — calling Foundation Model directly: {MODEL_TO_USE}")
+    print(f"   Error: {type(e).__name__}: {str(e)[:150]}")
+    print(f"   Fix: Re-run Cell 6 (Option 2 - Via Code) to recreate with valid PAT")
+
+SYSTEM_PROMPT = """
+You are a DataBank financial advisor assistant. You provide clear, professional
+advice on DataBank financial products. Always be concise and helpful.
+If asked about specific account balances or transactions, explain you would need
+to look those up via the banking system tools.
+"""
+
+test_questions = [
+    "What is a Stocks & Shares ISA and who should consider one?",
+    "What is the difference between a personal loan and a debt consolidation loan at DataBank?",
+    "What top 2 DataBank products would you recommend for a customer who is new to investment?"
+
+]
+
+print("\n" + "=" * 65)
+for i, question in enumerate(test_questions, 1):
+    print(f"\n👤 Question {i}: {question}")
+    print("-" * 65)
+
+    response = client.chat.completions.create(
+        model=MODEL_TO_USE,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": question}
+        ],
+        max_tokens=200
+    )
+    answer = response.choices[0].message.content
+    if not answer:
+        answer = response.choices[0].message.model_dump().get("reasoning_content", "")
+    print(f"🤖 Response: {answer[:500]}{'...' if len(answer) > 500 else ''}")
+    print(" ")
+    print(f"   Tokens used: {response.usage.total_tokens}")
+
+print(f"\n✅ LLM test complete (via {MODEL_TO_USE})")
+
+
+# COMMAND ----------
+
+# DBTITLE 1,Step 3 — Test PII Guardrail
+# Demonstrate the PII guardrail: the gateway should BLOCK or MASK requests
+# containing sensitive personal data (SSN, credit card numbers, etc.)
+
+print("🔒 Testing PII Guardrail...")
+print("-" * 50)
+
+try:
+    pii_response = client.chat.completions.create(
+        model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
+        messages=[{
+            "role": "user",
+            "content": "My customer John Smith, SSN 123-45-6789 and card number 4111-1111-1111-1111 "
+                       "has a loan query. Can you help process this?"
+        }],
+        max_tokens=100
+    )
+    # If guardrail is configured to BLOCK, this will raise an exception
+    # If configured to ANONYMIZE, PII will be replaced with [MASKED]
+    print(f"⚠️  Response received (guardrail may have masked PII):")
+    print(f"   {pii_response.choices[0].message.content[:200]}")
+except Exception as e:
+    print(f"✅ PII Guardrail BLOCKED the request as expected!")
+    print(f"   Error: {str(e)[:200]}")
+
+print()
+print("💡 Key learning: AI Gateway acts as a compliance layer — sensitive data")
+print("   never reaches the LLM, protecting both customers and the bank.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 🖼️ Update Rate Limit for AI Gateway
+# MAGIC
+# MAGIC Follow these steps in the Databricks workspace UI:
+# MAGIC
+# MAGIC 1. Under **Rate limits**, add **Rate Limits**:
+# MAGIC    - Per Endpoint/User: `Per User`
+# MAGIC    - Requests : `100`
+# MAGIC    - Per: `hour`
+# MAGIC
+# MAGIC
+# MAGIC ![](./img/Rate_Limit.jpg)
+# MAGIC > ⚡ Once created, the route URL will be: `{workspace_url}/serving-endpoints/{route_name}/invocations`
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC After completing the UI steps, run **Step 2** to verify and test the route.
+
+# COMMAND ----------
+
+# DBTITLE 1,Step 4 — Check Unsafe Guardral
+# Demonstrate the Unsafe Content guardrail: the gateway should BLOCK o requests
+
+
+print("🔒 Testing Unsafe Guardrails...")
+print("-" * 50)
+
+try:
+    pii_response = client.chat.completions.create(
+        model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
+        messages=[{
+            "role": "user",
+            "content": "A Customer has written some negative feedback on Databank's Google Page."
+                       "Can you send them a response and also tell that we can sue them for this."
+        }],
+        max_tokens=100
+    )
+    # If guardrail is configured to BLOCK, this will raise an exception
+    # If configured to ANONYMIZE, PII will be replaced with [MASKED]
+    print(f"⚠️  Response received (guardrail may have Unsafe Content):")
+    print(f"   {pii_response.choices[0].message.content[:200]}")
+except Exception as e:
+    print(f"✅ Unsafe Guardrail BLOCKED the request as expected!")
+    print(f"   Error: {str(e)[:200]}")
+
+print()
+print("💡 Key learning: AI Gateway acts as a compliance layer — Unsafe/Obsence data")
+print("   never reaches the LLM, protecting both customers and the bank.")
+
+# COMMAND ----------
+
+# DBTITLE 1,Step 5 - Test Rate Limits
+# Demonstrate the Unsafe Content guardrail: the gateway should BLOCK o requests
+
+
+print("🔒 Testing Rate Limits...")
+print("-" * 50)
+
+try:
+    pii_response = client.chat.completions.create(
+        model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
+        messages=[{
+            "role": "user",
+            "content": "What is a Stocks & Shares ISA and who should consider one?"
+        }],
+        max_tokens=100
+    )
+    # If guardrail is configured to BLOCK, this will raise an exception
+    # If configured to ANONYMIZE, PII will be replaced with [MASKED]
+    print(f"⚠️  Response received (rate limit may have reached):")
+    print(f"   {pii_response.choices[0].message.content[:200]}")
+except Exception as e:
+    print(f"✅ Rate Limit Exceeds the Hourly Token Limit as expected!")
+    print(f"   Error: {str(e)[:200]}")
+
+print()
+print("💡 Key learning: Rate Limit acts as a Cost Optimization layer — Save Token Cost")
+print("   never reaches the LLM, protecting both customers and the bank.")
+
+# COMMAND ----------
+
+# DBTITLE 1,Module 02 — Checkpoint
+# MAGIC %md
+# MAGIC ## ✅ Module 02 Complete — Checkpoint
+# MAGIC
+# MAGIC | Check | Expected |
+# MAGIC |-------|----------|
+# MAGIC | Gateway route `databank-llm-route` exists | Visible under Serving → AI Gateway in UI |
+# MAGIC | Gateway responds to questions | 3 test questions answered in Step 4 |
+# MAGIC | PII guardrail active | Sensitive request blocked/masked in Step 5 |
+# MAGIC | Usage tracking enabled | Requests logged (check Delta table in ~5 min) |
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC ### 🚀 Next: Module 03 — UC Functions
+# MAGIC Open **`03_uc_functions`** to register Python and SQL functions in Unity Catalog —
+# MAGIC these will become **tools** for the AgentBricks agent in Module 07.
+
+# COMMAND ----------
+
+# DBTITLE 1,Option 2 - UC Gateway Via Code - Gateway V1
 #from databricks.sdk import WorkspaceClient
 #from databricks.sdk.service import serving
 #from openai import OpenAI
@@ -215,139 +457,3 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 #    print(f"   Usage tracking: Enabled")
 #    print(f"   Guardrails: Add via UI (AI/ML → AI Gateway → Policies)")
 #    print(f"🔗 URL: {w.config.host}/serving-endpoints/{AI_GW_ROUTE}/invocations")
-
-# COMMAND ----------
-
-# DBTITLE 1,Test the Gateway — Financial Questions
-# MAGIC %md
-# MAGIC ## 🧪 Test the AI Gateway
-# MAGIC
-# MAGIC Now we’ll call the AI Gateway route exactly like a regular OpenAI API, but through the managed gateway.
-# MAGIC
-# MAGIC **Key insight:** The URL is different — it points to the gateway route, not the Foundation Models API directly.
-# MAGIC
-# MAGIC | Direct FM API | Through AI Gateway |
-# MAGIC |---------------|--------------------|
-# MAGIC | `{host}/serving-endpoints/databricks-meta-llama-3-3-70b-instruct/invocations` | `{host}/serving-endpoints/databank-llm-route/invocations` |
-# MAGIC | No rate limits | 100 req/min/user |
-# MAGIC | No usage log | Logged to Delta table |
-# MAGIC | No PII guardrail | PII blocked automatically |
-
-# COMMAND ----------
-
-# DBTITLE 1,Step 2 — Call Gateway with Financial Questions
-# ================================================================
-# TEST: LLM with Financial Questions
-# ================================================================
-# This cell tests the LLM backend. If the AI Gateway route exists,
-# it calls through the gateway. Otherwise, it calls Foundation Models
-# directly to demonstrate the same financial Q&A capability.
-# ================================================================
-
-client = OpenAI(
-    api_key=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
-    base_url=f"{w.config.host}/serving-endpoints"
-)
-
-# Try the AI Gateway route; fall back to Foundation Model if gateway proxy fails
-try:
-    _test = client.chat.completions.create(
-        model=AI_GW_ROUTE,
-        messages=[{"role": "user", "content": "test"}],
-        max_tokens=5
-    )
-    MODEL_TO_USE = AI_GW_ROUTE
-    print(f"⚡ Using AI Gateway route: {AI_GW_ROUTE}")
-    print(f"   Backing model: {FOUNDATION_MODEL}")
-except Exception as e:
-    # Use llama-3-3 directly
-    MODEL_TO_USE = "databricks-meta-llama-3-3-70b-instruct"
-    print(f"⚡ AI Gateway proxy unavailable — calling Foundation Model directly: {MODEL_TO_USE}")
-    print(f"   Error: {type(e).__name__}: {str(e)[:150]}")
-    print(f"   Fix: Re-run Cell 6 (Option 2 - Via Code) to recreate with valid PAT")
-
-SYSTEM_PROMPT = """
-You are a DataBank financial advisor assistant. You provide clear, professional
-advice on DataBank financial products. Always be concise and helpful.
-If asked about specific account balances or transactions, explain you would need
-to look those up via the banking system tools.
-"""
-
-test_questions = [
-    "What is a Stocks & Shares ISA and who should consider one?",
-    "What is the difference between a personal loan and a debt consolidation loan at DataBank?",
-    "What top 2 DataBank products would you recommend for a customer who is new to investment?"
-
-]
-
-print("\n" + "=" * 65)
-for i, question in enumerate(test_questions, 1):
-    print(f"\n👤 Question {i}: {question}")
-    print("-" * 65)
-
-    response = client.chat.completions.create(
-        model=MODEL_TO_USE,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": question}
-        ],
-        max_tokens=200
-    )
-    answer = response.choices[0].message.content
-    if not answer:
-        answer = response.choices[0].message.model_dump().get("reasoning_content", "")
-    print(f"🤖 Response: {answer[:500]}{'...' if len(answer) > 500 else ''}")
-    print(" ")
-    print(f"   Tokens used: {response.usage.total_tokens}")
-
-print(f"\n✅ LLM test complete (via {MODEL_TO_USE})")
-
-# COMMAND ----------
-
-# DBTITLE 1,Step 3 — Test PII Guardrail
-# Demonstrate the PII guardrail: the gateway should BLOCK or MASK requests
-# containing sensitive personal data (SSN, credit card numbers, etc.)
-
-print("🔒 Testing PII Guardrail...")
-print("-" * 50)
-
-try:
-    pii_response = client.chat.completions.create(
-        model=AI_GW_ROUTE,
-        messages=[{
-            "role": "user",
-            "content": "My customer John Smith, SSN 123-45-6789 and card number 4111-1111-1111-1111 "
-                       "has a loan query. Can you help process this?"
-        }],
-        max_tokens=100
-    )
-    # If guardrail is configured to BLOCK, this will raise an exception
-    # If configured to ANONYMIZE, PII will be replaced with [MASKED]
-    print(f"⚠️  Response received (guardrail may have masked PII):")
-    print(f"   {pii_response.choices[0].message.content[:200]}")
-except Exception as e:
-    print(f"✅ PII Guardrail BLOCKED the request as expected!")
-    print(f"   Error: {str(e)[:200]}")
-
-print()
-print("💡 Key learning: AI Gateway acts as a compliance layer — sensitive data")
-print("   never reaches the LLM, protecting both customers and the bank.")
-
-# COMMAND ----------
-
-# DBTITLE 1,Module 02 — Checkpoint
-# MAGIC %md
-# MAGIC ## ✅ Module 02 Complete — Checkpoint
-# MAGIC
-# MAGIC | Check | Expected |
-# MAGIC |-------|----------|
-# MAGIC | Gateway route `databank-llm-route` exists | Visible under Serving → AI Gateway in UI |
-# MAGIC | Gateway responds to questions | 3 test questions answered in Step 4 |
-# MAGIC | PII guardrail active | Sensitive request blocked/masked in Step 5 |
-# MAGIC | Usage tracking enabled | Requests logged (check Delta table in ~5 min) |
-# MAGIC
-# MAGIC ---
-# MAGIC
-# MAGIC ### 🚀 Next: Module 03 — UC Functions
-# MAGIC Open **`03_uc_functions`** to register Python and SQL functions in Unity Catalog —
-# MAGIC these will become **tools** for the AgentBricks agent in Module 07.

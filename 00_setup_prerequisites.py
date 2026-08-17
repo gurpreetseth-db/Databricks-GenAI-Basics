@@ -45,16 +45,8 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2a — Update Storage Location For Your Schema
-# ================================================================#
-#           PROVIDE YOUR CATALOG_STORAGE_LOCATION                 #
-#           PROVIDE YOUR CATALOG NAME (IF EXISTS)                 #
-# ================================================================#
-
-CATALOG = "databank_lab"
-CATALOG_STORAGE = "s3://gsethi-anz-psa-external-storage"
-
-
+# DBTITLE 1,Step 2a - Location of Catalog (if needed)
+CATALOG_STORAGE = 's3://gsethi-anz-psa-external-storage/'
 
 # COMMAND ----------
 
@@ -66,6 +58,7 @@ user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
 import re
 username_clean = re.sub(r'\W+', '', user.split('@')[0])
 
+CATALOG = f"{username_clean}_databank_lab"
 
 # Unity Catalog location for all lab assets
 if not CATALOG:
@@ -73,27 +66,27 @@ if not CATALOG:
 else:
     CATALOG = CATALOG
 
-SCHEMA = f"{username_clean}_financial_data"
+SCHEMA         = f"{username_clean}_financial_data"
 VOLUME         = "documents"
 VOLUME_PATH    = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
 
 # Vector Search
 # Endpoint is created automatically in Step 5 below
-AI_VECTOR_SEARCH_ENDPOINT = f"{username_clean}_vs_endpoint"
-VS_INDEX_NAME  = f"{CATALOG}.{SCHEMA}.product_docs_index"
+AI_VECTOR_SEARCH_ENDPOINT = f"{username_clean}-vs-endpoint"
+VS_INDEX_NAME  = f"{CATALOG}.{SCHEMA}.product-docs-index"
 
 # AI Gateway (created in Module 02)
-AI_GW_ROUTE    = f"{username_clean}_databank-llm-route"
+AI_GW_ROUTE    = f"{username_clean}-databank-llm-route"
 
 # Agent serving endpoint (created in Module 07)
-AGENT_ENDPOINT = f"{username_clean}_databank-ai-advisor"
+AGENT_ENDPOINT = f"{username_clean}-databank-ai-advisor"
 
 # Foundation Model used throughout the lab (no API key needed — hosted by Databricks)
-FOUNDATION_MODEL = "databricks-meta-llama-3-3-70b-instruct"
+FOUNDATION_MODEL = "system.ai.gemma-3-12b"
 EMBEDDING_MODEL  = "databricks-gte-large-en"
 
 # Genie Name
-GENIE_NAME   = f"{username_clean}_DataBank Financial Advisor"
+GENIE_NAME   = f"{username_clean}-DataBank-Financial-Advisor"
 
 
 
@@ -198,7 +191,7 @@ w = WorkspaceClient()
 # Create an OpenAI-compatible client pointing to Databricks serving endpoints
 client = OpenAI(
     api_key=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
-    base_url=f"{w.config.host}/serving-endpoints"
+    base_url=f"{w.config.host}/ai-gateway/mlflow/v1"
 )
 
 # Quick test — confirm the LLM is reachable

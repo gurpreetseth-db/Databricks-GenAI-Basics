@@ -1,5 +1,10 @@
 # Databricks notebook source
-
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# DBTITLE 1,Run Pre-Requisities
+# MAGIC %run ./00_setup_prerequisites
 
 # COMMAND ----------
 
@@ -38,16 +43,14 @@
 
 # DBTITLE 1,Step 0 — Configuration & Imports
 # ================================================================
-# CONFIGURATION
+# CONFIGURATION (re-derive after Cell 3 Python restart)
 # ================================================================
+import re
 user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-CATALOG          = "databank_lab"
-SCHEMA           = "financial_data"
-AGENT_ENDPOINT   = "test-ai-advisor"   # From Module 07
-FOUNDATION_MODEL = "gemma-3-12b"  # Used as judge
-EXPERIMENT_NAME  = f"/Users/{user}/databank-ai-lab/databank-agent-evaluation"
-
+username_clean = re.sub(r'\W+', '', user.split('@')[0])
+AGENT_ENDPOINT = f"{username_clean}_databank-ai-advisor"
+FOUNDATION_MODEL = "databricks-meta-llama-3-3-70b-instruct"
+experiment_name = f"/Users/{user}/{username_clean}_databank_ai_lab"
 
 from databricks.sdk import WorkspaceClient
 
@@ -89,6 +92,7 @@ endpoint_name= get_superagent_endpoint_name(AGENT_ENDPOINT)
 # ================================================================
 import mlflow
 import mlflow.genai
+
 from mlflow.genai.scorers import RetrievalGroundedness, Guidelines, Safety
 from openai import OpenAI
 from databricks.sdk import WorkspaceClient
@@ -101,8 +105,8 @@ client = OpenAI(
     base_url=f"{w.config.host}/serving-endpoints"
 )
 
-mlflow.set_experiment(EXPERIMENT_NAME)
-print(f"✅ Evaluation experiment: {EXPERIMENT_NAME}")
+mlflow.set_experiment(experiment_name)
+print(f"✅ Evaluation experiment: {experiment_name}")
 print(f"🤖 Agent endpoint  : {endpoint_name}")
 print(f"⚖️  Judge model     : {FOUNDATION_MODEL}")
 
@@ -134,6 +138,7 @@ print(f"⚖️  Judge model     : {FOUNDATION_MODEL}")
 # expected_response = the ideal answer we expect from the agent
 # These serve as ground truth for the LLM judge
 
+import pandas as pd 
 eval_data = [
     # --- Product Knowledge (document RAG) ---
     {"inputs": "What is the current AER on the DataBank Fixed-Rate Bond for a 3-year term?",
@@ -350,7 +355,6 @@ def _mlflow_predict(question):
     return agent_predict(question)
 
 print(f"🏃 Running evaluation on {len(df_eval_mlflow)} questions...")
-print("   Using Llama 3.3 70B as judge. Takes ~3-5 minutes.")
 print()
 
 # ----------------------------------------------------------------
@@ -370,7 +374,7 @@ with mlflow.start_run(run_name="databank-agent-eval-v1"):
     )
 
 print("\n✅ Evaluation complete!")
-print(f"   Results logged to experiment: {EXPERIMENT_NAME}")
+print(f"   Results logged to experiment: {experiment_name}")
 
 # COMMAND ----------
 

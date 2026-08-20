@@ -41,74 +41,90 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration & Imports
 # ================================================================
-# CONFIGURATION (re-derive after Cell 3 Python restart)
+# TEST: LLM with Financial Questions
 # ================================================================
-import re
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
-AGENT_ENDPOINT = f"{username_clean}_databank-ai-advisor"
-FOUNDATION_MODEL = "databricks-meta-llama-3-3-70b-instruct"
-experiment_name = f"/Users/{user}/{username_clean}_databank_ai_lab"
-
-from databricks.sdk import WorkspaceClient
-
-def get_superagent_endpoint_name(superagent_name):
-    _w = WorkspaceClient()
-    normalise = lambda s: s.lower().replace("-", "").replace("_", "").replace(" ", "")
-    all_eps   = list(_w.serving_endpoints.list())
-    
-    # 1. Exact name match
-    endpoint_name = next((ep.name for ep in all_eps if ep.name == superagent_name), None)
-    
-    # 2. Fuzzy match (normalised agent name appears inside endpoint name
-    if not endpoint_name:
-        term = normalise(superagent_name)
-        endpoint_name = next((ep.name for ep in all_eps if term in normalise(ep.name)), None)
-    
-    # 3. AgentBricks fallback — supervisor agent endpoints are always named mas-<uuid>-endpoint
-    if not endpoint_name:
-        mas_eps = [ep.name for ep in all_eps
-            if ep.name.startswith("mas-") and ep.name.endswith("-endpoint")]
-    if len(mas_eps) == 1:
-        endpoint_name = mas_eps[0]
-    elif len(mas_eps) > 1:
-        print(f"⚠️  Multiple AgentBricks supervisor endpoints found.")
-        print(f"   Update superagent_name in cell 5 to one of:")
-        for n in mas_eps:
-            print(f"   {n}")
-
-    if endpoint_name:
-        ENDPOINTNAME = endpoint_name          # available for downstream cells
-        return ENDPOINTNAME
-    else:
-        print(f"⚠️  Could not resolve endpoint for '{AGENT_ENDPOINT}'")
-
-endpoint_name= get_superagent_endpoint_name(AGENT_ENDPOINT)
-
+# This cell tests the LLM backend. If the AI Gateway route exists,
+# it calls through the gateway. Otherwise, it calls Foundation Models
+# directly to demonstrate the same financial Q&A capability.
 # ================================================================
-# IMPORTS
-# ================================================================
-import mlflow
-import mlflow.genai
-
-from mlflow.genai.scorers import RetrievalGroundedness, Guidelines, Safety
+import os
 from openai import OpenAI
 from databricks.sdk import WorkspaceClient
-import pandas as pd
-import json, time
 
+# --- Workspace authentication (automatic Bearer token, no PAT needed) ---
 w = WorkspaceClient()
+token = w.config.authenticate().get("Authorization", "").replace("Bearer ", "")
+
 client = OpenAI(
-    api_key=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
-    base_url=f"{w.config.host}/serving-endpoints"
+    api_key=token,
+    base_url=f"{w.config.host}/ai-gateway/mlflow/v1"
 )
 
-mlflow.set_experiment(experiment_name)
-print(f"✅ Evaluation experiment: {experiment_name}")
-print(f"🤖 Agent endpoint  : {endpoint_name}")
-print(f"⚖️  Judge model     : {FOUNDATION_MODEL}")
+# Try the AI Gateway route; fall back to Foundation Model if gateway proxy fails
+try:
+    _test = client.chat.completions.create(
+        model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
+        messages=[{"role": "user", "content": "test"}],
+        max_tokens=5
+    )
+    MODEL_TO_USE = f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}"
+    print(f"⚡ Using AI Gateway route: {CATALOG}.{SCHEMA}.{AI_GW_ROUTE}")
+    print(f"   Backing model: {FOUNDATION_MODEL}")
+except Exception as e:
+    # Use llama-3-3 directly
+    MODEL_TO_USE = "llama_v3_3_70b_instruct"
+    print(f"⚡ AI Gateway proxy unavailable — calling Foundation Model directly: {MODEL_TO_USE}")
+    print(f"   Error: {type(e).__name__}: {str(e)[:150]}")
+    print(f"   Fix: Re-run Cell 6 (Option 2 - Via Code) to recreate with valid PAT")
+
+SYSTEM_PROMPT = """
+You are a DataBank financial advisor assistant. You provide clear, professional
+advice on DataBank financial products. Always be concise and helpful.
+If asked about specific account balances or transactions, explain you would need
+to look those up via the banking system tools.
+"""
+
+test_questions = [
+    "What is a Stocks & Shares ISA and who should consider one?",
+    "What is the difference between a personal loan and a debt consolidation loan at DataBank?",
+    "What top 2 DataBank products would you recommend for a customer who is new to investment?"
+
+]
+
+print("\n" + "=" * 65)
+for i, question in enumerate(test_questions, 1):
+    print(f"\n👤 Question {i}: {question}")
+    print("-" * 65)
+
+    response = client.chat.completions.create(
+        model=MODEL_TO_USE,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": question}
+        ],
+        max_tokens=200
+    )
+    answer = response.choices[0].message.content
+    if not answer:
+        answer = response.choices[0].message.model_dump().get("reasoning_content", "")
+    print(f"🤖 Response: {answer[:500]}{'...' if len(answer) > 500 else ''}")
+    print(" ")
+    print(f"   Tokens used: {response.usage.total_tokens}")
+
+print(f"\n✅ LLM test complete (via {MODEL_TO_USE})")
+
+
+# COMMAND ----------
+
+# DBTITLE 1,Step 0 — Configuration & Imports
+# ================================================================
+# UPGRADE MLflow to fix import errors
+# ================================================================
+# After this cell, Python restarts. Re-run Cell 1 (%run prerequisites)
+# then continue from Cell 6 onwards.
+# ================================================================
+%pip install --upgrade mlflow[databricks] -q
 
 # COMMAND ----------
 
@@ -254,49 +270,90 @@ display(df_eval.head())
 # COMMAND ----------
 
 # DBTITLE 1,Step 2 — Define Agent Wrapper for Evaluation
-# MLflow genai.evaluate() requires a callable that accepts a single question string
-# and returns the agent's response string.
+# ================================================================
+# EVALUATION SETUP (self-contained after pip install restart)
+# Re-establishes LLM client (same as Cell 3) and defines predict_fn
+# for mlflow.genai.evaluate()
+# ================================================================
+import re, time
+import mlflow
+import mlflow.genai
+import pandas as pd
+from openai import OpenAI
+from databricks.sdk import WorkspaceClient
 
-import requests as _requests
+# --- Re-derive configuration (same as 00_setup_prerequisites) ---
+w = WorkspaceClient()
+user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
+username_clean = re.sub(r'\W+', '', user.split('@')[0])
 
-def agent_predict(question: str) -> str:
-    """
-    Wrapper function that calls the DataBank AI Advisor agent.
-    Used by mlflow.genai.evaluate() to get predictions for each eval row.
-    AgentBricks endpoints require 'input' (not 'messages'), so we call
-    /invocations directly instead of using the OpenAI client.
-    """
-    try:
-        token = w.config.authenticate().get("Authorization", "").replace("Bearer ", "")
-        resp = _requests.post(
-            f"{w.config.host}/serving-endpoints/{endpoint_name}/invocations",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"input": [{"role": "user", "content": question}]},
-            timeout=120
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # Extract final answer from AgentBricks event stream
-        for event in reversed(data.get("output", [])):
-            if event.get("type") == "message" and event.get("role") == "assistant":
-                for block in event.get("content", []):
-                    if block.get("type") == "output_text":
-                        return block.get("text", "").strip()
-        # Fallback to standard OpenAI format
-        return (data.get("choices", [{}])[0].get("message", {}).get("content")
-                or str(data))
-    except Exception as e:
-        # Return error string — will score poorly, which is intentional
-        return f"[ERROR: {str(e)[:200]}]"
+#CATALOG = f"{username_clean}_databank_lab"
+#SCHEMA = f"{username_clean}_financial_data"
+#AI_GW_ROUTE = f"{username_clean}-databank-llm-route"
+#FOUNDATION_MODEL = "databricks-meta-llama-3-3-70b-instruct"
+#experiment_name = f"/Users/{user}/{username_clean}_databank_ai_lab"
 
-# Quick smoke test
-print("🧩 Quick smoke test:")
+# --- LLM Client (same pattern as Cell 3) ---
+client = OpenAI(
+    api_key=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
+    base_url=f"{w.config.host}/ai-gateway/mlflow/v1"
+)
+
+# Determine model — try AI Gateway route, fall back to Foundation Model
+try:
+    _test = client.chat.completions.create(
+        model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
+        messages=[{"role": "user", "content": "test"}],
+        max_tokens=5
+    )
+    MODEL_TO_USE = f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}"
+    print(f"⚡ Using AI Gateway route: {MODEL_TO_USE}")
+except Exception:
+    # Fall back to Foundation Model via serving endpoints
+    MODEL_TO_USE = FOUNDATION_MODEL
+    client = OpenAI(
+        api_key=w.config.authenticate().get("Authorization", "").replace("Bearer ", ""),
+        base_url=f"{w.config.host}/serving-endpoints"
+    )
+    print(f"⚡ AI Gateway unavailable — using Foundation Model: {MODEL_TO_USE}")
+
+# System prompt (same as Cell 3)
+SYSTEM_PROMPT = """
+You are a DataBank financial advisor assistant. You provide clear, professional
+advice on DataBank financial products. Always be concise and helpful.
+If asked about specific account balances or transactions, explain you would need
+to look those up via the banking system tools.
+"""
+
+mlflow.set_experiment(experiment_name)
+
+# --- Predict Function for mlflow.genai.evaluate() ---
+# MLflow 3.x unpacks the 'inputs' dict as kwargs to this function,
+# so the parameter name must match the key in the eval data ('question').
+def predict_fn(question: str) -> str:
+    """Call the LLM (same config as Cell 3) and return the response."""
+    response = client.chat.completions.create(
+        model=MODEL_TO_USE,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": question}
+        ],
+        max_tokens=400
+    )
+    answer = response.choices[0].message.content
+    if not answer:
+        answer = response.choices[0].message.model_dump().get("reasoning_content", "")
+    return answer
+
+# Smoke test
 test_q = "What is the FSCS protection limit for DataBank savings accounts?"
-test_resp = agent_predict(test_q)
+test_a = predict_fn(question=test_q)
+print(f"\n🧪 Smoke test:")
 print(f"   Q: {test_q}")
-print(f"   A: {test_resp[:200]}...")
-print()
-print("✅ Agent wrapper is working")
+print(f"   A: {test_a[:250]}...")
+print(f"\n✅ Configuration complete")
+print(f"   Experiment : {experiment_name}")
+print(f"   Model      : {MODEL_TO_USE}")
 
 # COMMAND ----------
 
@@ -323,6 +380,10 @@ print("✅ Agent wrapper is working")
 # DBTITLE 1,Step 3 — Define and Run Evaluation
 from mlflow.genai.scorers import Guidelines, Safety, Correctness
 
+# ================================================================
+# SCORERS: Define what the LLM judge evaluates
+# ================================================================
+
 # Custom DataBank-specific guidelines scorer
 databank_guidelines = Guidelines(
     name="databank_compliance",
@@ -345,31 +406,32 @@ print("✅ Scorers configured:")
 print("   • databank_compliance (custom guidelines)")
 print("   • correctness (factual accuracy vs expected answer)")
 print("   • safety (harmful content detection)")
-print()
-# mlflow.genai.evaluate requires 'inputs' column as dicts, not plain strings.
+
+# ================================================================
+# PREPARE EVALUATION DATA
+# ================================================================
+# mlflow.genai.evaluate requires 'inputs' as dicts and 'expectations' for scoring
 df_eval_mlflow = df_eval.copy()
 df_eval_mlflow['inputs'] = df_eval_mlflow['inputs'].apply(lambda q: {"question": q})
-df_eval_mlflow['expectations'] = df_eval_mlflow['expected_response'].apply(lambda a: {"expected_response": a})
+df_eval_mlflow['expectations'] = df_eval_mlflow['expected_response'].apply(
+    lambda a: {"expected_response": a}
+)
 
-def _mlflow_predict(question):
-    return agent_predict(question)
+print(f"\n🏃 Running evaluation on {len(df_eval_mlflow)} questions against: {MODEL_TO_USE}")
+print(f"   (This may take 3-5 minutes as each question is sent to the LLM)\n")
 
-print(f"🏃 Running evaluation on {len(df_eval_mlflow)} questions...")
-print()
-
-# ----------------------------------------------------------------
-# Run MLflow GenAI Evaluation
-# ----------------------------------------------------------------
-with mlflow.start_run(run_name="databank-agent-eval-v1"):
-    # Log dataset info
-    mlflow.log_param("agent_endpoint",    endpoint_name)
-    mlflow.log_param("judge_model",       FOUNDATION_MODEL)
+# ================================================================
+# RUN MLflow GenAI Evaluation
+# ================================================================
+with mlflow.start_run(run_name="databank-llm-eval-v1"):
+    mlflow.log_param("model", MODEL_TO_USE)
+    mlflow.log_param("judge_model", FOUNDATION_MODEL)
+    mlflow.log_param("system_prompt", SYSTEM_PROMPT.strip()[:250])
     mlflow.log_param("num_eval_questions", len(df_eval_mlflow))
 
-    # Run evaluation
     eval_results = mlflow.genai.evaluate(
         data=df_eval_mlflow,
-        predict_fn=_mlflow_predict,
+        predict_fn=predict_fn,
         scorers=[databank_guidelines, correctness, safety]
     )
 
@@ -389,41 +451,69 @@ if eval_results and hasattr(eval_results, 'metrics'):
         print(f"  {metric_name:<35} {value:.3f}  {bar}")
 
 # Display per-question results
+# MLflow 3.x: table key is 'eval_results', scores in '/value' columns,
+# inputs/outputs nested in 'request'/'response' dicts
 if eval_results and hasattr(eval_results, 'tables'):
-    results_df = eval_results.tables.get('eval_results_table')
+    results_df = eval_results.tables.get('eval_results')
     if results_df is not None:
+        # Extract question and response text from nested dicts
+        results_df['question'] = results_df['request'].apply(
+            lambda r: next((m['content'] for m in r.get('messages', []) if m['role'] == 'user'), '')
+        )
+        results_df['answer'] = results_df['response'].apply(
+            lambda r: r.get('choices', [{}])[0].get('message', {}).get('content', '')[:200]
+        )
+        # Map correctness/compliance values to numeric for sorting
+        results_df['correctness_score'] = results_df['correctness/value'].map({'yes': 1, 'no': 0})
+        results_df['compliance_score'] = results_df['databank_compliance/value'].map({'yes': 1, 'no': 0})
+        results_df['safety_score'] = results_df['safety/value'].map({'yes': 1, 'no': 0})
+
         print("\n📝 Per-Question Results (bottom 5 by correctness):")
-        display(results_df.sort_values('correctness/score').head(5)[
-            ['inputs', 'outputs', 'expected_response', 'correctness/score',
-             'databank_compliance/score', 'category']
+        display(results_df.sort_values('correctness_score').head(5)[
+            ['question', 'answer', 'correctness/value', 'correctness/rationale',
+             'databank_compliance/value', 'databank_compliance/rationale',
+             'safety/value', 'safety/rationale']
         ])
 
 # COMMAND ----------
 
 # DBTITLE 1,Step 5 — Score by Category
 # Analyse performance by category to identify which tool needs improvement
+
 if eval_results and hasattr(eval_results, 'tables'):
-    results_df = eval_results.tables.get('eval_results_table')
-    if results_df is not None and 'category' in results_df.columns:
+    results_df = eval_results.tables.get('eval_results')
+    if results_df is not None:
+        # Ensure numeric score columns exist (created in Step 4)
+        if 'correctness_score' not in results_df.columns:
+            results_df['correctness_score'] = results_df['correctness/value'].map({'yes': 1, 'no': 0})
+            results_df['compliance_score'] = results_df['databank_compliance/value'].map({'yes': 1, 'no': 0})
+            results_df['safety_score'] = results_df['safety/value'].map({'yes': 1, 'no': 0})
+
+        # Join category from the original eval dataset
+        results_df['category'] = df_eval['category'].values
+
         category_summary = results_df.groupby('category').agg(
-            correctness=("correctness/score", "mean"),
-            compliance=("databank_compliance/score", "mean"),
-            count=("inputs", "count")
+            correctness=("correctness_score", "mean"),
+            compliance=("compliance_score", "mean"),
+            safety=("safety_score", "mean"),
+            count=("correctness_score", "count")
         ).round(3)
 
         print("📊 Performance by Category:")
-        print("-" * 60)
-        print(f"{'Category':<25} {'Correctness':<15} {'Compliance':<12} {'N'}")
-        print("-" * 60)
+        print("-" * 70)
+        print(f"  {'Category':<20} {'Correctness':<14} {'Compliance':<14} {'Safety':<10} {'N'}")
+        print("-" * 70)
         for cat, row in category_summary.iterrows():
-            correctness_bar = "█" * int(row.correctness * 10)
-            print(f"  {cat:<23} {row.correctness:<15.2f} {row.compliance:<12.2f} {int(row['count'])}")
+            print(f"  {cat:<20} {row.correctness:<14.2f} {row.compliance:<14.2f} {row.safety:<10.2f} {int(row['count'])}")
 
         # Find the weakest category
         weakest = category_summary['correctness'].idxmin()
         print()
         print(f"🔦 Weakest category: {weakest} ({category_summary.loc[weakest, 'correctness']:.2f})")
         print("   Consider improving: prompt instructions, tool descriptions, or training data for this category.")
+
+        # Show as a display table too
+        display(category_summary.reset_index())
 else:
     print("⚠️  Results table not available. Check the Experiments UI for detailed results.")
 
@@ -452,21 +542,3 @@ else:
 # MAGIC | Portfolio review | Add more context to the agent’s portfolio instructions |
 # MAGIC | Fraud detection | Add more example fraud scenarios to the evaluation dataset |
 # MAGIC
-# MAGIC ### 🏆 Congratulations! Lab Complete.
-# MAGIC
-# MAGIC You have built and deployed a complete financial AI assistant:
-# MAGIC
-# MAGIC ```
-# MAGIC ✅ Module 00: Infrastructure (Catalog, Schema, Volume)
-# MAGIC ✅ Module 01: Synthetic Dataset (5 tables + 7 PDFs)
-# MAGIC ✅ Module 02: AI Gateway (Managed LLM route with guardrails)
-# MAGIC ✅ Module 03: UC Functions (Risk score, Portfolio, Fraud)
-# MAGIC ✅ Module 04: Vector Search (Semantic search over documents)
-# MAGIC ✅ Module 05: Genie Space (Natural language SQL)
-# MAGIC ✅ Module 06: ML Experiments (Prompt tracking and comparison)
-# MAGIC ✅ Module 07: AgentBricks Supervisor Agent (All tools assembled)
-# MAGIC ✅ Module 08: Databricks App (Live Gradio chat UI)
-# MAGIC ✅ Module 09: LLM Evaluation (Quality measurement with LLM judge)
-# MAGIC ```
-# MAGIC
-# MAGIC 🙌 Well done, DataBank AI Engineers!

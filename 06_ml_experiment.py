@@ -45,48 +45,48 @@
 # COMMAND ----------
 
 # DBTITLE 1,Step 0 — Configuration & Imports
-
 # ================================================================
-# IMPORTS
+# IMPORTS & CONFIGURATION
 # ================================================================
 import mlflow
 import mlflow.data
-from mlflow.models import infer_signature
 from openai import OpenAI
 from databricks.sdk import WorkspaceClient
 import time
 import json
 import logging
-import os
 
 # Suppress harmless Py4J security warning on Serverless compute
 logging.getLogger("mlflow.tracking.context.registry").setLevel(logging.ERROR)
 
+# --- Workspace authentication (automatic Bearer token, no PAT needed) ---
 w = WorkspaceClient()
+token = w.config.authenticate().get("Authorization", "").replace("Bearer ", "")
 
-LLM_Key = "dapi93a5ebe67c280ac2b4aadfec0a91462f"
-# Use AI Gateway route (Module 02) or fall back to Foundation Models directly
+# --- OpenAI client pointing to AI Gateway ---
+client = OpenAI(
+    api_key=token,
+    base_url=f"{w.config.host}/ai-gateway/mlflow/v1"
+)
+
+# --- Determine model: try AI Gateway route, fall back to Foundation Model ---
 try:
-    w.serving_endpoints.get(name=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}")
-    # Verify the gateway actually works with a quick test call
-    _test_client = OpenAI(api_key=LLM_Key, base_url=f"{w.config.host}/ai-gateway/mlflow/v1")
-    _test_client.chat.completions.create(
+    _test = client.chat.completions.create(
         model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
-        messages=[{"role": "user", "content": "hi"}],
+        messages=[{"role": "user", "content": "test"}],
         max_tokens=5
     )
-    ACTIVE_MODEL = f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}"
-    print(f"✅ Using AI Gateway route: {CATALOG}.{SCHEMA}.{AI_GW_ROUTE}")
+    MODEL_TO_USE = f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}"
+    print(f"⚡ Using AI Gateway route: {MODEL_TO_USE}")
+    print(f"   Backing model: {FOUNDATION_MODEL}")
 except Exception as e:
-    ACTIVE_MODEL = f"databricks-{FOUNDATION_MODEL}"
-    print(f"⚠️  AI Gateway not usable ({type(e).__name__}), using Foundation Model: {ACTIVE_MODEL}")
-
-_token = w.config.authenticate().get("Authorization", "").replace("Bearer ", "")
-
-client = OpenAI(
-    api_key=_token,
-    base_url=f"{w.config.host}/serving-endpoints"
-)
+    MODEL_TO_USE = FOUNDATION_MODEL
+    client = OpenAI(
+        api_key=token,
+        base_url=f"{w.config.host}/serving-endpoints"
+    )
+    print(f"⚡ AI Gateway unavailable — using Foundation Model: {MODEL_TO_USE}")
+    print(f"   ({type(e).__name__}: {str(e)[:100]})")
 
 print(f"\n📈 MLflow Experiment: {experiment_name}")
 
@@ -95,16 +95,16 @@ print(f"\n📈 MLflow Experiment: {experiment_name}")
 # DBTITLE 1,Step 1 — Create MLflow Experiment
 # Create or get experiment
 # Using a personal folder path following workspace policy
-w.workspace.mkdirs(path="/".join(EXPERIMENT_NAME.split("/")[:-1]))
-mlflow.set_experiment(EXPERIMENT_NAME)
-experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+w.workspace.mkdirs(path="/".join(experiment_name.split("/")[:-1]))
+mlflow.set_experiment(experiment_name)
+experiment = mlflow.get_experiment_by_name(experiment_name)
 
-print(f"✅ Experiment: {EXPERIMENT_NAME}")
+print(f"✅ Experiment: {experiment_name}")
 print(f"   Experiment ID : {experiment.experiment_id if experiment else 'creating...'}")
 print(f"   Lifecycle     : {experiment.lifecycle_stage if experiment else 'active'}")
 print()
 print("💡 Open the MLflow Experiments UI to see your runs:")
-print(f"   Left sidebar → Experiments → {EXPERIMENT_NAME.split('/')[-1]}")
+print(f"   Left sidebar → Experiments → {experiment_name.split('/')[-1]}")
 
 # COMMAND ----------
 
@@ -178,7 +178,7 @@ def run_experiment(prompt_name: str, system_prompt: str, question: str, temperat
     start = time.time()
     try:
         response = client.chat.completions.create(
-            model=ACTIVE_MODEL,
+            model=MODEL_TO_USE,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": question}
@@ -204,7 +204,7 @@ def run_experiment(prompt_name: str, system_prompt: str, question: str, temperat
     except PermissionDeniedError:
         # AI Gateway permission denied — fall back to foundation model
         fallback_model = f"databricks-{FOUNDATION_MODEL}"
-        print(f"  ⚠️  Permission denied on {ACTIVE_MODEL}, retrying with {fallback_model}...")
+        print(f"  ⚠️  Permission denied on {MODEL_TO_USE}, retrying with {fallback_model}...")
         try:
             response = client.chat.completions.create(
                 model=fallback_model,
@@ -253,7 +253,7 @@ def run_experiment(prompt_name: str, system_prompt: str, question: str, temperat
         time.sleep(15)
         try:
             response = client.chat.completions.create(
-                model=ACTIVE_MODEL,
+                model=MODEL_TO_USE,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user",   "content": question}
@@ -289,7 +289,7 @@ def run_experiment(prompt_name: str, system_prompt: str, question: str, temperat
         time.sleep(60)
         try:
             response = client.chat.completions.create(
-                model=ACTIVE_MODEL,
+                model=MODEL_TO_USE,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user",   "content": question}
@@ -324,7 +324,7 @@ def run_experiment(prompt_name: str, system_prompt: str, question: str, temperat
 TEMPERATURES = [0.0, 0.7]  # deterministic vs creative
 run_count = 0
 
-mlflow.set_experiment(EXPERIMENT_NAME)
+mlflow.set_experiment(experiment_name)
 
 for temp in TEMPERATURES:
     for prompt_name, system_prompt in PROMPT_VARIANTS.items():
@@ -334,7 +334,7 @@ for temp in TEMPERATURES:
             # Log parameters
             mlflow.log_param("prompt_variant",  prompt_name)
             mlflow.log_param("temperature",     temp)
-            mlflow.log_param("model",           ACTIVE_MODEL)
+            mlflow.log_param("model",           MODEL_TO_USE)
             mlflow.log_param("system_prompt_len", len(system_prompt))
 
             # Log the prompt text as an artifact
@@ -379,7 +379,7 @@ print("   Open Experiments in the sidebar to compare runs visually.")
 
 # DBTITLE 1,Step 4 — Find and Display Best Run
 # Find the best run by highest average relevance score (then lowest latency)
-experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+experiment = mlflow.get_experiment_by_name(experiment_name)
 runs = mlflow.search_runs(
     experiment_ids=[experiment.experiment_id],
     order_by=["metrics.avg_relevance DESC", "metrics.avg_latency_ms ASC"]

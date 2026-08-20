@@ -37,20 +37,23 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Run Pre-Requisties
+# MAGIC %run ./00_setup_prerequisites
+
+# COMMAND ----------
+
 # DBTITLE 1,Step 0 — Configuration & Load Run
 from databricks.sdk import WorkspaceClient
 import mlflow
-import mlflow.genai
-import pandas as pd
 
 w = WorkspaceClient()
 user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
 
-EXPERIMENT_NAME = f"/Users/{user}/databank-ai-lab/databank-agent-evaluation"
-mlflow.set_experiment(EXPERIMENT_NAME)
+#EXPERIMENT_NAME = f"/Users/{user}/databank-ai-lab/databank-agent-evaluation"
+#mlflow.set_experiment(EXPERIMENT_NAME)
 
 # Load the most recent completed evaluation run
-experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+experiment = mlflow.get_experiment_by_name(experiment_name)
 runs = mlflow.search_runs(
     experiment_ids=[experiment.experiment_id],
     filter_string="status = 'FINISHED'",
@@ -62,7 +65,7 @@ if runs.empty:
     raise RuntimeError("No finished evaluation run found. Run Module 09 first.")
 
 RUN_ID = runs.iloc[0]["run_id"]
-print(f"✅ Experiment  : {EXPERIMENT_NAME}")
+print(f"✅ Experiment  : {experiment_name}")
 print(f"✅ Latest run  : {RUN_ID}")
 print(f"✅ Started at  : {runs.iloc[0]['start_time']}")
 
@@ -102,137 +105,16 @@ print(f"✅ Started at  : {runs.iloc[0]['start_time']}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Inspect Labels per Row
-# mlflow.genai.evaluate() stores results as traces, not as artifact tables.
-# Reconstruct results_df from the traces logged for this run.
-client_mlflow = mlflow.tracking.MlflowClient()
-
-traces = mlflow.search_traces(
-    locations=[experiment.experiment_id],
-    filter_string=f"attributes.run_id = '{RUN_ID}'",
-    max_results=100
-)
-
-if traces.empty:
-    raise RuntimeError("No traces found for this run. Ensure Module 09 ran successfully.")
-
-rows = []
-for t in traces.itertuples():
-    row = {
-        "inputs":  getattr(t, "inputs",  getattr(t, "request",  None)),
-        "outputs": getattr(t, "outputs", getattr(t, "response", None)),
-    }
-    # assessments is a list of dicts with keys: assessment_name, feedback, rationale
-    for a in (getattr(t, "assessments", None) or []):
-        if not isinstance(a, dict):
-            continue
-        name     = a.get("assessment_name", "")
-        feedback = a.get("feedback")        # present on scored assessments
-        if not name or not feedback:
-            continue                         # skip expectation entries (no feedback)
-        raw = feedback.get("value")
-        # Scores arrive as 'yes'/'no' strings; normalise to 1.0 / 0.0
-        if isinstance(raw, str):
-            value = 1.0 if raw.lower() == "yes" else 0.0
-        elif isinstance(raw, bool):
-            value = float(raw)
-        elif isinstance(raw, (int, float)):
-            value = float(raw)
-        else:
-            value = None
-        row[f"{name}/score"]     = value
-        row[f"{name}/rationale"] = a.get("rationale")
-    rows.append(row)
-
-results_df = pd.DataFrame(rows)
-
-# Normalise column names to lowercase
-results_df.columns = [c.lower() for c in results_df.columns]
-
-print(f"✅ Loaded {len(results_df)} labelled rows")
-print(f"   Columns: {list(results_df.columns)}")
-print()
-
-# Show label columns only
-label_cols = [c for c in results_df.columns if any(
-    c.startswith(p) for p in ["correctness", "safety", "databank_compliance"]
-)]
-print("Label columns found:")
-for c in sorted(label_cols):
-    print(results_df[c].notna().sum())
-    #non_null = results_df[c].notna().sum()
-    #print(f"  {c:<45}  ({non_null}/{len(results_df)} non-null)")
+# DBTITLE 1,Upgrade MLflow
+# Traces from Module 09 were logged with MLflow 3.x — upgrade to read them
+%pip install --upgrade 'mlflow[databricks]>=3.0.0' -q
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Label Distribution
-print("📊 Label Score Distribution")
-print("=" * 55)
-
-for scorer in ["correctness", "databank_compliance", "safety"]:
-    col = f"{scorer}/score"
-    if col not in results_df.columns:
-        print(f"  {scorer:<30} ⚠️  column not found")
-        continue
-
-    scores = results_df[col].dropna()
-    if scores.empty:
-        print(f"  {scorer:<30} ⚠️  all null (check expectations format)")
-        continue
-
-    mean_val = scores.mean()
-    bar      = "█" * int(mean_val * 20)
-    print(f"  {scorer:<30} mean={mean_val:.3f}  {bar}")
-
-    # Distribution buckets
-    bins = {"0.0": 0, "0.1-0.5": 0, "0.6-0.9": 0, "1.0": 0}
-    for v in scores:
-        if   v == 0.0:        bins["0.0"]     += 1
-        elif v < 0.6:         bins["0.1-0.5"] += 1
-        elif v < 1.0:         bins["0.6-0.9"] += 1
-        else:                 bins["1.0"]     += 1
-    print(f"    {'  '.join(f'{k}: {n}' for k, n in bins.items())}")
-
-print()
-
-# Rows that failed all three automated labels
-fail_mask = (
-    (results_df.get('correctness/score',       pd.Series(dtype=float)) < 0.5) |
-    (results_df.get('databank_compliance/score', pd.Series(dtype=float)) < 1.0) |
-    (results_df.get('safety/score',             pd.Series(dtype=float)) < 1.0)
-)
-print(f"⚠️  Rows with at least one label failure : {fail_mask.sum()} / {len(results_df)}")
-
-# COMMAND ----------
-
-# DBTITLE 1,Step 4 — Failed Rows with Rationale
-# Show the rows that scored below threshold, with the judge's rationale
-threshold = 0.5
-failed_df  = results_df[
-    results_df.get('correctness/score', pd.Series(1.0, index=results_df.index)).fillna(1.0) < threshold
-].copy()
-
-if failed_df.empty:
-    print("✅ No rows scored below threshold — agent is performing well!")
-else:
-    print(f"🔍 {len(failed_df)} rows scored below {threshold} on Correctness:\n")
-    for i, row in failed_df.iterrows():
-        q = row.get('inputs', {}) or {}
-        question    = q.get('question', str(q))[:120] if isinstance(q, dict) else str(q)[:120]
-        score       = row.get('correctness/score', 'n/a')
-        rationale   = str(row.get('correctness/rationale', 'n/a'))[:300]
-        expected    = str(row.get('expectations', {}) or {})[:150]
-        print(f"  [{i}] Score: {score}")
-        print(f"       Q: {question}")
-        print(f"       Rationale: {rationale}")
-        print(f"       Expected : {expected}")
-        print()
-
-# COMMAND ----------
-
-# DBTITLE 1,Step 5 — Human Labels
+# DBTITLE 1,Step 3 — Human Labels
 # MAGIC %md
-# MAGIC ## ✍️ Step 5: Adding Human Labels
+# MAGIC ## ✍️ Step 3: Adding Human Labels
 # MAGIC
 # MAGIC Automated labels from an LLM judge can be wrong — especially for domain-specific content like financial regulations. You can override or augment them with **human labels**.
 # MAGIC
@@ -254,93 +136,11 @@ else:
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 6 — Apply a Human Label to a Trace
-# Retrieve traces logged during the evaluation run
-traces = mlflow.search_traces(
-    locations=[experiment.experiment_id],
-    filter_string=f"attributes.run_id = '{RUN_ID}'",
-    max_results=5
-)
-
-if traces.empty:
-    print("⚠️  No traces found for this run. Make sure Module 09 ran with tracing enabled.")
-else:
-    print(f"Found {len(traces)} traces for run {RUN_ID}")
-    print()
-
-    # Show the first trace so you can decide whether to label it
-    first_trace = traces.iloc[0]
-    print(f"Trace ID  : {first_trace['trace_id']}")
-    print(f"Status    : {first_trace['state']}")
-    print()
-
-    # Apply a human correctness label to the first trace
-    # score: 1 = correct, 0 = incorrect
-    # rationale: your review comment
-    TRACE_ID   = first_trace['trace_id']
-    SCORE      = True          # True = pass, False = fail
-    RATIONALE  = "Reviewed manually: response correctly cites FSCS £85,000 limit and is appropriate for the advisor context."
-
-    mlflow.log_feedback(
-        trace_id=TRACE_ID,
-        name="correctness",
-        value=SCORE,
-        rationale=RATIONALE
-    )
-    print(f"✅ Human label applied to trace {TRACE_ID}")
-    print(f"   Score     : {SCORE}")
-    print(f"   Rationale : {RATIONALE}")
-
-# COMMAND ----------
-
-# DBTITLE 1,Step 7 — Compare Automated vs Human Labels
-# Re-load traces and show both automated and human labels side-by-side
-traces_with_labels = mlflow.search_traces(
-    locations=[experiment.experiment_id],
-    filter_string=f"attributes.run_id = '{RUN_ID}'",
-    max_results=25
-)
-
-rows = []
-for t in traces_with_labels.itertuples():
-    automated = None
-    human     = None
-    for a in (getattr(t, 'assessments', None) or []):
-        if not isinstance(a, dict):
-            continue
-        name   = a.get('assessment_name', '')
-        source = a.get('source', {})
-        raw    = (a.get('feedback') or {}).get('value')
-        value  = 1.0 if str(raw).lower() == 'yes' else (0.0 if raw is not None else None)
-        if name == 'correctness':
-            if source.get('source_type', '').upper() == 'HUMAN':
-                human = value
-            else:
-                automated = value
-    rows.append({
-        'trace_id':              getattr(t, 'trace_id', '')[:16] + '...',
-        'automated_correctness': automated,
-        'human_correctness':     human
-    })
-
-df_comparison = pd.DataFrame(rows)
-display(df_comparison)
-
-# Agreement rate (where both exist)
-both = df_comparison.dropna(subset=['automated_correctness', 'human_correctness'])
-if not both.empty:
-    agreement = (both['automated_correctness'] == both['human_correctness']).mean()
-    print(f"\nAutomated ↔ Human agreement rate: {agreement:.1%} ({len(both)} labelled rows)")
-else:
-    print("\nNo rows with both automated and human labels yet.")
-
-# COMMAND ----------
-
-# DBTITLE 1,Step 8 - Create DataBank Labelling Schema
+# DBTITLE 1,Step 1 - Create DataBank Labelling Schema
 import mlflow
 from mlflow.genai.label_schemas import create_label_schema, InputCategorical, InputText
 
-mlflow.set_experiment("/Users/gurpreet.sethi@databricks.com/databank-ai-lab/databank-agent-evaluation")
+mlflow.set_experiment(experiment_name)
 
 schemas = [
     # 1 — Overall quality triage
@@ -434,14 +234,13 @@ for s in schemas:
 
 # COMMAND ----------
 
-# DBTITLE 1,Step - 9 Create Label Session
+# DBTITLE 1,Step - 2 Create Label Session
 import mlflow
 import mlflow.genai
 
-mlflow.set_experiment("/Users/gurpreet.sethi@databricks.com/databank-ai-lab/databank-agent-evaluation")
-experiment = mlflow.get_experiment_by_name(
-    "/Users/gurpreet.sethi@databricks.com/databank-ai-lab/databank-agent-evaluation"
-)
+mlflow.set_experiment(experiment_name)
+experiment = mlflow.get_experiment_by_name(experiment_name)
+
 
 # Fetch the 25 evaluation traces
 traces_df = mlflow.search_traces(
@@ -472,3 +271,27 @@ print(f"   Session ID  : {session.labeling_session_id}")
 print(f"   Assigned to : {session.assigned_users}")
 print(f"   Schemas     : {session.label_schemas}")
 print(f"   Review URL  : {session.url}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC
+# MAGIC ### 🏆 Congratulations! Lab Complete.
+# MAGIC
+# MAGIC You have built and deployed a complete financial AI assistant:
+# MAGIC
+# MAGIC ```
+# MAGIC ✅ Module 00: Infrastructure (Catalog, Schema, Volume)
+# MAGIC ✅ Module 01: Synthetic Dataset (5 tables + 7 PDFs)
+# MAGIC ✅ Module 02: AI Gateway (Managed LLM route with guardrails)
+# MAGIC ✅ Module 03: UC Functions (Risk score, Portfolio, Fraud)
+# MAGIC ✅ Module 04: Vector Search (Semantic search over documents)
+# MAGIC ✅ Module 05: Genie Space (Natural language SQL)
+# MAGIC ✅ Module 06: ML Experiments (Prompt tracking and comparison)
+# MAGIC ✅ Module 07: AgentBricks Supervisor Agent (All tools assembled)
+# MAGIC ✅ Module 08: Databricks App (Live Gradio chat UI)
+# MAGIC ✅ Module 09: LLM Evaluation (Quality measurement with LLM judge)
+# MAGIC ✅ Module 10: LLM Evaluation (Labelling Sesisons and Schemas)
+# MAGIC ```
+# MAGIC
+# MAGIC 🙌 Well done, DataBank AI Engineers!

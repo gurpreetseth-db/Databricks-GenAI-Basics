@@ -174,10 +174,11 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 import os
 from openai import OpenAI
 
-LLM_Key = "dapi93a5ebe67c280ac2b4aadfec0a91462f"
+# Automatically fetch Bearer token from the workspace session — no PAT needed
+token = w.config.authenticate().get("Authorization", "").replace("Bearer ", "")
 
 client = OpenAI(
-    api_key=LLM_Key,
+    api_key=token,
     base_url=f"{w.config.host}/ai-gateway/mlflow/v1"
 )
 

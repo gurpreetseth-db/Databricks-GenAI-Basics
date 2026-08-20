@@ -250,7 +250,8 @@ print(f"🤖  Agent    : {AGENT_ENDPOINT} ✅")
 print(f"🤖  AI GW    : {AI_GW_ROUTE} ✅")
 print(f"🔍  AI/Vector Search Endpoint : {AI_VECTOR_SEARCH_ENDPOINT} ✅")
 print(f"🔍  VS Index : {VS_INDEX_NAME} ✅")
-print(f"🤖 Experiment : {experiment_name} ✅")
+print(f"🤖  Experiment : {experiment_name} ✅")
+print(f"🔍 Genie Agent: {GENIE_NAME} ✅")
 
 
 

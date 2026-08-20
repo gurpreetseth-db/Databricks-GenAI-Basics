@@ -3,6 +3,18 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
+# MAGIC %md
+# MAGIC ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+# MAGIC ## **CAUTION!!!**
+# MAGIC ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+# MAGIC
+# MAGIC **As of 20_Aug-2026**
+# MAGIC
+# MAGIC - For the **Knowledge Assistant** & **Supervised Agent** Please check of **Budget Policy** Public Preview is disabled as at present its not compatible with Entitlement Layer
+# MAGIC
+
+# COMMAND ----------
+
 # DBTITLE 1,Run Pre-Requisites
 # MAGIC %run ./00_setup_prerequisites
 

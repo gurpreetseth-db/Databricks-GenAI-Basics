@@ -3,8 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-# DBTITLE 1,Run Pre-Requisites
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
@@ -44,7 +44,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration & Imports
+# DBTITLE 1,Step 2 — Configuration & Imports
 # ================================================================
 # IMPORTS & CONFIGURATION
 # ================================================================
@@ -92,7 +92,7 @@ print(f"\n📈 MLflow Experiment: {experiment_name}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Create MLflow Experiment
+# DBTITLE 1,Step 3 — Create MLflow Experiment
 # Create or get experiment
 # Using a personal folder path following workspace policy
 w.workspace.mkdirs(path="/".join(experiment_name.split("/")[:-1]))
@@ -120,14 +120,14 @@ print(f"   Left sidebar → Experiments → {experiment_name.split('/')[-1]}")
 # MAGIC | `detailed` | Comprehensive | Full DataBank context, rules, product knowledge |
 # MAGIC | `role_based` | Persona-driven | Assigns a specific advisor persona with values |
 # MAGIC
-# MAGIC For each prompt, we test the same **3 financial questions** and log:
+# MAGIC For each prompt, we test **different financial questions per temperature** (3 each) and log:
 # MAGIC - Response latency (ms)
 # MAGIC - Response length (tokens)
 # MAGIC - A simple relevance heuristic (does the answer mention key financial terms?)
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Define Prompts and Test Questions
+# DBTITLE 1,Step 4 — Define Prompts and Test Questions
 # The 3 prompt strategies to compare
 PROMPT_VARIANTS = {
     "minimal": "You are a helpful financial advisor.",
@@ -157,20 +157,37 @@ Your goal: help DataBank customers make confident financial decisions.
 """
 }
 
-# Test questions that represent real advisor queries
-TEST_QUESTIONS = [
-    "A 45-year-old customer with a moderate risk profile wants to invest £20,000. What do you recommend?",
-    "What is the fastest way for a customer to get a £10,000 personal loan from DataBank?",
-    "A customer is worried about protecting their family if they become critically ill. What should they consider?"
-]
+# Larger question pool — each temperature run gets a DIFFERENT set of questions
+QUESTION_POOL = {
+    0.0: [
+        "A 45-year-old customer with a moderate risk profile wants to invest £20,000. What do you recommend?",
+        "What is the fastest way for a customer to get a £10,000 personal loan from DataBank?",
+        "A customer is worried about protecting their family if they become critically ill. What should they consider?"
+    ],
+    0.7: [
+        "A 30-year-old first-time investor wants to start with £5,000 and has an aggressive risk appetite. What options does DataBank offer?",
+        "A retired couple wants to move £150,000 from a current account into something safe with better returns. What do you suggest?",
+        "A small business owner needs £50,000 to expand their shop. Compare the loan and credit options available at DataBank."
+    ]
+}
 
-print(f"💡 {len(PROMPT_VARIANTS)} prompt variants × {len(TEST_QUESTIONS)} questions × 2 temperatures = 12 total calls")
+TEMPERATURES = [0.0, 0.7]
+
+total_calls = sum(len(qs) for qs in QUESTION_POOL.values()) * len(PROMPT_VARIANTS)
+print(f"💡 {len(PROMPT_VARIANTS)} prompt variants × {len(QUESTION_POOL[0.0])} questions × {len(TEMPERATURES)} temperatures = {total_calls} total calls")
+print(f"   Each temperature uses a DIFFERENT question set for broader coverage.")
+print()
+for temp, qs in QUESTION_POOL.items():
+    print(f"   temp={temp}: {len(qs)} questions")
+    for q in qs:
+        print(f"      • {q[:80]}...")
+print()
 for name, prompt in PROMPT_VARIANTS.items():
     print(f"   {name}: {len(prompt)} chars")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Run Experiments
+# DBTITLE 1,Step 5 — Run Experiments
 from openai import BadRequestError, RateLimitError, InternalServerError, PermissionDeniedError
 
 def run_experiment(prompt_name: str, system_prompt: str, question: str, temperature: float) -> dict:
@@ -321,12 +338,12 @@ def run_experiment(prompt_name: str, system_prompt: str, question: str, temperat
             }
 
 
-TEMPERATURES = [0.0, 0.7]  # deterministic vs creative
 run_count = 0
 
 mlflow.set_experiment(experiment_name)
 
 for temp in TEMPERATURES:
+    questions = QUESTION_POOL[temp]  # different questions per temperature
     for prompt_name, system_prompt in PROMPT_VARIANTS.items():
         # One MLflow run per (temperature, prompt_variant)
         with mlflow.start_run(run_name=f"{prompt_name}_temp{temp}"):
@@ -336,6 +353,7 @@ for temp in TEMPERATURES:
             mlflow.log_param("temperature",     temp)
             mlflow.log_param("model",           MODEL_TO_USE)
             mlflow.log_param("system_prompt_len", len(system_prompt))
+            mlflow.log_param("question_set",    f"temp_{temp}")
 
             # Log the prompt text as an artifact
             mlflow.log_text(system_prompt, artifact_file="system_prompt.txt")
@@ -344,9 +362,10 @@ for temp in TEMPERATURES:
             all_latencies = []
             all_relevance = []
 
-            for i, question in enumerate(TEST_QUESTIONS):
+            for i, question in enumerate(questions):
                 if i > 0:
                     time.sleep(5)  # small delay between calls to stay within TPM limit
+                print(f"      Q{i+1}: {question[:70]}...")
                 result = run_experiment(prompt_name, system_prompt, question, temp)
 
                 # Log per-question metrics
@@ -361,6 +380,7 @@ for temp in TEMPERATURES:
 
                 all_latencies.append(result["latency_ms"])
                 all_relevance.append(result["relevance_score"])
+                print(f"         ✓ latency={result['latency_ms']}ms | relevance={result['relevance_score']}")
 
             # Log aggregate metrics
             mlflow.log_metric("avg_latency_ms",   sum(all_latencies) / len(all_latencies))
@@ -368,11 +388,13 @@ for temp in TEMPERATURES:
             mlflow.log_metric("max_relevance",    max(all_relevance))
 
             run_count += 1
-            print(f"  [{run_count}] | {question} | temp={temp} | "
+            print(f"  ✅ [{run_count}] {prompt_name} | temp={temp} | "
                   f"avg_latency={sum(all_latencies)//len(all_latencies)}ms | "
                   f"avg_relevance={sum(all_relevance)/len(all_relevance):.1f}")
+            print()
 
 print(f"\n✅ {run_count} experiment runs completed")
+print("   Each temperature used a unique question set for broader evaluation coverage.")
 print("   Open Experiments in the sidebar to compare runs visually.")
 
 # COMMAND ----------

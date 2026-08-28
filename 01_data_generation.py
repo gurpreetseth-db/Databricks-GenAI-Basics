@@ -59,32 +59,12 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 - Run the Setup Notebook
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration & Imports
-# ================================================================
-# CONFIGURATION (copy from Module 00 — run this cell first)
-# ================================================================
-
-# Get logged-in user information
-# If running this lab via Partner Academy Vocarium 
-
-#user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-# Extract username before '@' and remove special characters
-#import re
-#username_clean = re.sub(r'\W+', '', user.split('@')[0])
-
-#if "labuser" in username_clean:
-#    CATALOG = username_clean
-#else:
-#    CATALOG = "databank_lab"
-
-#SCHEMA       = "financial_data"
-#VOLUME_PATH  = f"/Volumes/{CATALOG}/{SCHEMA}/documents"
+# DBTITLE 1,Step 2 — Configuration & Imports
 
 # ================================================================
 # IMPORTS
@@ -117,7 +97,7 @@ print(f"📄 PDFs will be saved to: {VOLUME_PATH}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Create Products Table
+# DBTITLE 1,Step 3 — Create Products Table
 # 25 DataBank products across 5 categories
 # Schema: product_id, name, product_type, interest_rate_pct, min_balance_gbp, description
 products_data = [
@@ -189,8 +169,9 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.products"))
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Create Customers Table
+# DBTITLE 1,Step 4 — Create Customers Table
 # --- Imports (required if Cell 4 hasn't been run) ---
+%pip install faker==25.9.1
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, IntegerType, DoubleType
 import pandas as pd
@@ -282,7 +263,7 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.customers").limit(5))
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Create Accounts Table (FK join pattern)
+# DBTITLE 1,Step 5 — Create Accounts Table (FK join pattern)
 from pyspark.sql.window import Window
 
 # Accounts: 500 rows, one per customer, FK to both customers and products
@@ -348,7 +329,7 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.accounts").limit(5))
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 4 — Create Transactions Table
+# DBTITLE 1,Step 6 — Create Transactions Table
 # 10,000 banking transactions with realistic categories and a 2% fraud rate
 
 from pyspark.sql.types import BooleanType
@@ -432,7 +413,7 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.transactions").limit(5))
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 5 — Create Support Tickets Table
+# DBTITLE 1,Step 7 — Create Support Tickets Table
 # 300 support tickets with subjects, descriptions, and resolutions
 
 @F.pandas_udf(StringType())
@@ -561,104 +542,106 @@ display(spark.table(f"{CATALOG}.{SCHEMA}.support_tickets").filter("ticket_status
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 6a — PDF Helper Functions
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-import os
-
-def build_pdf(filepath: str, title: str, subtitle: str, sections: list):
-    """
-    Build a styled PDF brochure.
-    
-    sections: list of dicts with keys:
-        - 'heading': str
-        - 'body':    str (plain text or HTML-like)
-        - 'table':   list of lists (optional, adds a data table)
-    """
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    doc = SimpleDocTemplate(
-        filepath, pagesize=A4,
-        rightMargin=2*cm, leftMargin=2*cm,
-        topMargin=2*cm, bottomMargin=2*cm
-    )
-    styles = getSampleStyleSheet()
-
-    # Custom styles
-    brand_blue = colors.HexColor("#1B3A6B")
-    title_style = ParagraphStyle(
-        "Title", parent=styles["Title"],
-        textColor=brand_blue, fontSize=22, spaceAfter=6
-    )
-    subtitle_style = ParagraphStyle(
-        "Subtitle", parent=styles["Normal"],
-        textColor=colors.HexColor("#4A90D9"), fontSize=13, spaceAfter=18
-    )
-    heading_style = ParagraphStyle(
-        "Heading2", parent=styles["Heading2"],
-        textColor=brand_blue, fontSize=13, spaceBefore=14, spaceAfter=6
-    )
-    body_style = ParagraphStyle(
-        "Body", parent=styles["Normal"],
-        fontSize=10, leading=16, spaceAfter=10
-    )
-    footer_style = ParagraphStyle(
-        "Footer", parent=styles["Normal"],
-        textColor=colors.grey, fontSize=8, alignment=TA_CENTER
-    )
-
-    story = []
-
-    # Header bar
-    story.append(Paragraph("🏦 DataBank", ParagraphStyle(
-        "Logo", parent=styles["Normal"], fontSize=10,
-        textColor=colors.white, backColor=brand_blue,
-        spaceAfter=12, leading=20, leftIndent=-20, rightIndent=-20
-    )))
-    story.append(Spacer(1, 0.3*cm))
-    story.append(Paragraph(title, title_style))
-    story.append(Paragraph(subtitle, subtitle_style))
-    story.append(HRFlowable(width="100%", thickness=2, color=brand_blue, spaceAfter=14))
-
-    # Sections
-    for section in sections:
-        story.append(Paragraph(section["heading"], heading_style))
-        story.append(Paragraph(section["body"], body_style))
-        if "table" in section and section["table"]:
-            tbl = Table(section["table"], colWidths=[8*cm, 8*cm])
-            tbl.setStyle(TableStyle([
-                ("BACKGROUND", (0,0), (-1,0), brand_blue),
-                ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
-                ("FONTSIZE",   (0,0), (-1,0), 10),
-                ("FONTSIZE",   (0,1), (-1,-1), 9),
-                ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.whitesmoke, colors.white]),
-                ("GRID",       (0,0), (-1,-1), 0.5, colors.lightgrey),
-                ("TOPPADDING", (0,0), (-1,-1), 6),
-                ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-            ]))
-            story.append(tbl)
-            story.append(Spacer(1, 0.4*cm))
-
-    # Footer
-    story.append(Spacer(1, 1*cm))
-    story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
-    story.append(Paragraph(
-        "DataBank plc | Authorised and regulated by the Financial Conduct Authority | "
-        "FCA Register No. 987654 | databank.co.uk",
-        footer_style
-    ))
-
-    doc.build(story)
-    print(f"  ✓ Created: {filepath}")
-
-print("✅ PDF helper function ready")
+# DBTITLE 1,Step 8a — PDF Helper Functions
+# MAGIC %pip install reportlab==4.2.5
+# MAGIC
+# MAGIC from reportlab.lib.pagesizes import A4
+# MAGIC from reportlab.lib import colors
+# MAGIC from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+# MAGIC from reportlab.lib.units import cm
+# MAGIC from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+# MAGIC from reportlab.lib.enums import TA_CENTER, TA_LEFT
+# MAGIC import os
+# MAGIC
+# MAGIC def build_pdf(filepath: str, title: str, subtitle: str, sections: list):
+# MAGIC     """
+# MAGIC     Build a styled PDF brochure.
+# MAGIC     
+# MAGIC     sections: list of dicts with keys:
+# MAGIC         - 'heading': str
+# MAGIC         - 'body':    str (plain text or HTML-like)
+# MAGIC         - 'table':   list of lists (optional, adds a data table)
+# MAGIC     """
+# MAGIC     os.makedirs(os.path.dirname(filepath), exist_ok=True)
+# MAGIC     doc = SimpleDocTemplate(
+# MAGIC         filepath, pagesize=A4,
+# MAGIC         rightMargin=2*cm, leftMargin=2*cm,
+# MAGIC         topMargin=2*cm, bottomMargin=2*cm
+# MAGIC     )
+# MAGIC     styles = getSampleStyleSheet()
+# MAGIC
+# MAGIC     # Custom styles
+# MAGIC     brand_blue = colors.HexColor("#1B3A6B")
+# MAGIC     title_style = ParagraphStyle(
+# MAGIC         "Title", parent=styles["Title"],
+# MAGIC         textColor=brand_blue, fontSize=22, spaceAfter=6
+# MAGIC     )
+# MAGIC     subtitle_style = ParagraphStyle(
+# MAGIC         "Subtitle", parent=styles["Normal"],
+# MAGIC         textColor=colors.HexColor("#4A90D9"), fontSize=13, spaceAfter=18
+# MAGIC     )
+# MAGIC     heading_style = ParagraphStyle(
+# MAGIC         "Heading2", parent=styles["Heading2"],
+# MAGIC         textColor=brand_blue, fontSize=13, spaceBefore=14, spaceAfter=6
+# MAGIC     )
+# MAGIC     body_style = ParagraphStyle(
+# MAGIC         "Body", parent=styles["Normal"],
+# MAGIC         fontSize=10, leading=16, spaceAfter=10
+# MAGIC     )
+# MAGIC     footer_style = ParagraphStyle(
+# MAGIC         "Footer", parent=styles["Normal"],
+# MAGIC         textColor=colors.grey, fontSize=8, alignment=TA_CENTER
+# MAGIC     )
+# MAGIC
+# MAGIC     story = []
+# MAGIC
+# MAGIC     # Header bar
+# MAGIC     story.append(Paragraph("🏦 DataBank", ParagraphStyle(
+# MAGIC         "Logo", parent=styles["Normal"], fontSize=10,
+# MAGIC         textColor=colors.white, backColor=brand_blue,
+# MAGIC         spaceAfter=12, leading=20, leftIndent=-20, rightIndent=-20
+# MAGIC     )))
+# MAGIC     story.append(Spacer(1, 0.3*cm))
+# MAGIC     story.append(Paragraph(title, title_style))
+# MAGIC     story.append(Paragraph(subtitle, subtitle_style))
+# MAGIC     story.append(HRFlowable(width="100%", thickness=2, color=brand_blue, spaceAfter=14))
+# MAGIC
+# MAGIC     # Sections
+# MAGIC     for section in sections:
+# MAGIC         story.append(Paragraph(section["heading"], heading_style))
+# MAGIC         story.append(Paragraph(section["body"], body_style))
+# MAGIC         if "table" in section and section["table"]:
+# MAGIC             tbl = Table(section["table"], colWidths=[8*cm, 8*cm])
+# MAGIC             tbl.setStyle(TableStyle([
+# MAGIC                 ("BACKGROUND", (0,0), (-1,0), brand_blue),
+# MAGIC                 ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
+# MAGIC                 ("FONTSIZE",   (0,0), (-1,0), 10),
+# MAGIC                 ("FONTSIZE",   (0,1), (-1,-1), 9),
+# MAGIC                 ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.whitesmoke, colors.white]),
+# MAGIC                 ("GRID",       (0,0), (-1,-1), 0.5, colors.lightgrey),
+# MAGIC                 ("TOPPADDING", (0,0), (-1,-1), 6),
+# MAGIC                 ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+# MAGIC             ]))
+# MAGIC             story.append(tbl)
+# MAGIC             story.append(Spacer(1, 0.4*cm))
+# MAGIC
+# MAGIC     # Footer
+# MAGIC     story.append(Spacer(1, 1*cm))
+# MAGIC     story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
+# MAGIC     story.append(Paragraph(
+# MAGIC         "DataBank plc | Authorised and regulated by the Financial Conduct Authority | "
+# MAGIC         "FCA Register No. 987654 | databank.co.uk",
+# MAGIC         footer_style
+# MAGIC     ))
+# MAGIC
+# MAGIC     doc.build(story)
+# MAGIC     print(f"  ✓ Created: {filepath}")
+# MAGIC
+# MAGIC print("✅ PDF helper function ready")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 6b — Generate Product Brochures
+# DBTITLE 1,Step 8b — Generate Product Brochures
 brochures_dir = f"{VOLUME_PATH}/product_brochures"
 
 # --- 1. Savings Products ---
@@ -828,7 +811,7 @@ print("✅ All 5 product brochures generated")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 6c — Generate Compliance Documents
+# DBTITLE 1,Step 8c — Generate Compliance Documents
 compliance_dir = f"{VOLUME_PATH}/compliance"
 
 # --- 6. Frequently Asked Questions ---
@@ -902,7 +885,7 @@ print("✅ Compliance documents generated")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 7 — Verify All Outputs
+# DBTITLE 1,Step 9 — Verify All Outputs
 import os
 
 print("=" * 55)

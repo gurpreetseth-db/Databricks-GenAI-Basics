@@ -38,12 +38,12 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Pre-requisites
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration
+# DBTITLE 1,Step 02 — Configuration
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import serving
 from openai import OpenAI
@@ -236,6 +236,7 @@ for i, question in enumerate(test_questions, 1):
 print(f"\n✅ LLM test complete (via {MODEL_TO_USE})")
 
 
+
 # COMMAND ----------
 
 # DBTITLE 1,Step 3 — Test PII Guardrail
@@ -332,7 +333,7 @@ try:
         model=f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}",
         messages=[{
             "role": "user",
-            "content": "What is a Stocks & Shares ISA and who should consider one?"
+            "content": "What is a Stocks & Shares ISA and who should consider one? Is there any specific consideration that one has to take in ordert to invest in specific one"
         }],
         max_tokens=100
     )

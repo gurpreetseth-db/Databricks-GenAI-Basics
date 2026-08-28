@@ -6,33 +6,17 @@
 # DBTITLE 1,Module 00 — Welcome
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Module 00: Setup & Prerequisites
-# MAGIC **Duration:** ~15 minutes | **Track:** All participants
+# MAGIC **Duration:** ~10 minutes | **Track:** All participants
 # MAGIC
 # MAGIC ---
 # MAGIC
-# MAGIC ### What is this lab?
-# MAGIC You are an engineer at **DataBank** — a fictional retail bank. Over the next 4 hours you will build a production-grade AI assistant that financial advisors can use to:
-# MAGIC - 🔍 Query customer transactions and portfolios using natural language
-# MAGIC - 📄 Search product documentation and compliance documents instantly
-# MAGIC - ⚠️ Detect suspicious transactions and calculate risk scores
-# MAGIC - 💬 Get product recommendations for customers
 # MAGIC ### What You'll Build in This Module
 # MAGIC - ✅ Python packages for the full lab
-# MAGIC - ✅ Unity Catalog: `<USERNAME>_databank_lab` catalog
-# MAGIC - ✅ Schema: `<USERNAME>_databank_lab.financial_data`
-# MAGIC - ✅ Volume: `/Volumes/databank_lab/financial_data/documents`
-# MAGIC - ✅ AI/Vector Search Endpoint: `<USERNAME>_vs_endpoint`
+# MAGIC - ✅ Unity Catalog
+# MAGIC - ✅ Schema
+# MAGIC - ✅ Volume
+# MAGIC - ✅ AI/Vector Search Endpoint
 # MAGIC - ✅ Verified access to Databricks Foundation Models API
-
-# COMMAND ----------
-
-# DBTITLE 1,Configuration — Set Your Lab Variables
-# MAGIC %md
-# MAGIC ## ⚙️ Configuration
-# MAGIC
-# MAGIC The cell below defines **all configuration variables** used across every module in this lab.
-# MAGIC
-# MAGIC > 💡 Update `CATALOG` and `CATALOG_STORAGE` in cell below to start the setup
 
 # COMMAND ----------
 
@@ -45,50 +29,8 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2a - Location of Catalog (if needed)
-CATALOG_STORAGE = 's3://gsethi-anz-psa-external-storage/'
-
-# COMMAND ----------
-
-# DBTITLE 1,Step 2b - Capture Lab Configuration Variables
-# Get logged-in user information
-user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
-
-# Extract username before '@' and remove special characters
-import re
-username_clean = re.sub(r'\W+', '', user.split('@')[0])
-
-CATALOG = f"{username_clean}_databank_lab"
-
-# Unity Catalog location for all lab assets
-if not CATALOG:
-    CATALOG = f"{username_clean}_databank_lab"
-else:
-    CATALOG = CATALOG
-
-SCHEMA         = f"{username_clean}_financial_data"
-VOLUME         = "documents"
-VOLUME_PATH    = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
-
-# Vector Search
-# Endpoint is created automatically in Step 5 below
-AI_VECTOR_SEARCH_ENDPOINT = f"{username_clean}-vs-endpoint"
-VS_INDEX_NAME  = f"{CATALOG}.{SCHEMA}.product-docs-index"
-
-# AI Gateway (created in Module 02)
-AI_GW_ROUTE    = f"{username_clean}-databank-llm-route"
-
-# Agent serving endpoint (created in Module 07)
-AGENT_ENDPOINT = f"{username_clean}-databank-ai-advisor"
-
-# Foundation Model used throughout the lab (no API key needed — hosted by Databricks)
-FOUNDATION_MODEL = "system.ai.gemma-3-12b"
-EMBEDDING_MODEL  = "databricks-gte-large-en"
-
-# Genie Name
-GENIE_NAME   = f"{username_clean}-DataBank-Financial-Advisor"
-
-
+# DBTITLE 1,Step 2 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
@@ -131,6 +73,8 @@ spark.sql(f"""
 # Create the volume — this is where PDFs and documents will be stored
 # Volumes act like a managed filesystem inside Unity Catalog
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {CATALOG}.{SCHEMA}.{VOLUME}")
+
+print(f"\n📂 Schema Created Sucessfully : {SCHEMA}")
 
 # Verify the volume is accessible by listing its contents (empty at this point)
 import os
@@ -217,7 +161,6 @@ print(f"   Workspace   : {w.config.host}")
 import mlflow
 
 mlflow.set_tracking_uri("databricks")
-experiment_name = f"/Users/{user}/{username_clean}_databank_ai_lab"
 
 try:
     experiment = mlflow.get_experiment_by_name(experiment_name)

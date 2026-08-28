@@ -1,0 +1,103 @@
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# MAGIC %md
+# MAGIC ## 🏦 DataBank AI Lab — Configure Parameters
+# MAGIC **Duration:** ~5 minutes | **Track:** All participants
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC ### What is this lab?
+# MAGIC You are an engineer at **DataBank** — a fictional retail bank. Over the next 4 hours you will build a production-grade AI assistant that financial advisors can use to:
+# MAGIC - 🔍 Query customer transactions and portfolios using natural language
+# MAGIC - 📄 Search product documentation and compliance documents instantly
+# MAGIC - ⚠️ Detect suspicious transactions and calculate risk scores
+# MAGIC - 💬 Get product recommendations for customers
+# MAGIC ### What You'll Build in This Module
+# MAGIC
+# MAGIC - ✅ Unity Catalog              : `<USERNAME>_databank_lab` catalog
+# MAGIC - ✅ Schema                     : `<USERNAME>_databank_lab.financial_data`
+# MAGIC - ✅ Volume                     : `/Volumes/databank_lab/financial_data/documents`
+# MAGIC - ✅ ML Experiment              : `/Users/{user}/{USERNAME}_databank_ai_lab`
+# MAGIC - ✅ AI/Vector Search Endpoint  : `<USERNAME>-vs-endpoint`
+# MAGIC - ✅ AI/Vector Search Index     : `<CATALOG>.<SCHEMA>-product-docs-index`
+# MAGIC - ✅ AI Gatway Route            : `<USERNAME>-databank-llm-route`
+# MAGIC - ✅ Agent Endpoint             : `<USERNAME>-databank-ai-advisor`
+# MAGIC - ✅ Foundation Model           : `system.ai.gemma-3-12b`
+# MAGIC - ✅ Embedded Model             : `databricks-gte-large-en`
+# MAGIC - ✅ Fallback Model             : `kimi_k3`
+# MAGIC - ✅ Genie Space                : `{USERNAME}-DataBank-Financial-Advisor`
+# MAGIC
+
+# COMMAND ----------
+
+# DBTITLE 1,Catalog Path - If Default Path Is not There
+CATALOG_STORAGE = 's3://gsethi-anz-psa-external-storage/'
+
+# COMMAND ----------
+
+# Get logged-in user information
+user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
+
+# Extract username before '@' and remove special characters
+import re
+username_clean = re.sub(r'\W+', '', user.split('@')[0])
+
+CATALOG = f"{username_clean}_databank_lab"
+
+# Unity Catalog location for all lab assets
+if not CATALOG:
+    CATALOG = f"{username_clean}_databank_lab"
+else:
+    CATALOG = CATALOG
+
+SCHEMA         = f"{username_clean}_financial_data"
+VOLUME         = "documents"
+VOLUME_PATH    = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
+
+# Experiment Name
+experiment_name = f"/Users/{user}/{username_clean}_databank_ai_lab"
+
+# Vector Search
+# Endpoint is created automatically in Step 5 below
+AI_VECTOR_SEARCH_ENDPOINT = f"{username_clean}-vs-endpoint"
+VS_INDEX_NAME  = f"{CATALOG}.{SCHEMA}.product-docs-index"
+
+# AI Gateway (created in Module 02)
+AI_GW_ROUTE    = f"{username_clean}-databank-llm-route"
+
+# Agent serving endpoint (created in Module 07)
+AGENT_ENDPOINT = f"{username_clean}-databank-ai-advisor"
+
+# Foundation Model used throughout the lab (no API key needed — hosted by Databricks)
+FOUNDATION_MODEL = "system.ai.gemma-3-12b"
+EMBEDDING_MODEL  = "databricks-gte-large-en"
+FALLBACK_MODEL   = "system.ai.databricks-kimi-k3"
+
+# Genie Name
+GENIE_NAME   = f"{username_clean}-DataBank-Financial-Advisor"
+
+
+# COMMAND ----------
+
+# ================================================================
+# List of Assets That Will Get Created
+# ================================================================
+
+print(f"📦  Catalog  : {CATALOG} ✅")
+print(f"📦  Catalog Storage Location  : {CATALOG_STORAGE} ✅")
+print(f"📁  Schema   : {CATALOG}.{SCHEMA} ✅")
+print(f"📄  Volume   : {VOLUME_PATH} ✅")
+print(f"🤖  LLM      : {FOUNDATION_MODEL} ✅")
+print(f"📐  Embed    : {EMBEDDING_MODEL} ✅")
+print(f"🤖  Agent    : {AGENT_ENDPOINT} ✅")
+print(f"🤖  AI GW    : {AI_GW_ROUTE} ✅")
+print(f"🔍  AI/Vector Search Endpoint : {AI_VECTOR_SEARCH_ENDPOINT} ✅")
+print(f"🔍  VS Index : {VS_INDEX_NAME} ✅")
+print(f"🤖  Experiment : {experiment_name} ✅")
+print(f"🤖  Foundation Model : {FOUNDATION_MODEL} ✅")
+print(f"🤖  Embedded Model : {EMBEDDING_MODEL} ✅")
+print(f"🤖  Faillback Model : {FALLBACK_MODEL} ✅")
+print(f"🔍 Genie Agent: {GENIE_NAME} ✅")

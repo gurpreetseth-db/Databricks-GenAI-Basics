@@ -3,12 +3,12 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-# DBTITLE 1,Run Pre-Requisities
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
-# DBTITLE 1,Module 07 — Welcome
+# DBTITLE 1,Module 05 — Welcome
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Module 05: Genie Space
 # MAGIC **Duration:** ~15 minutes | **Prerequisite:** Module 01 (data tables)
@@ -43,7 +43,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration
+# DBTITLE 1,Step 2 — Configuration
 # ================================================================
 # CONFIGURATION
 # ================================================================
@@ -102,7 +102,7 @@ for t in TABLES:
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Generate Instructions Text
+# DBTITLE 1,Step 3 — Generate Instructions Text
 # Run this cell to generate the Instructions text
 # Copy the output and paste it into the Genie Space Instructions field
 
@@ -138,7 +138,7 @@ print("COPY THE TEXT ABOVE INTO THE GENIE SPACE INSTRUCTIONS FIELD")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Generate Sample Certified Queries
+# DBTITLE 1,Step 4 — Generate Sample Certified Queries
 # These are the 5 sample questions to add to the Genie Space.
 # Genie uses these as examples to understand what queries to generate.
 
@@ -164,7 +164,7 @@ ORDER BY total_spend_gbp DESC
 LIMIT 10"""
     },
     {
-        "question": "Show me all customers with suspicious transactions in the last 30 days",
+        "question": "Show me all customers with suspicious transactions in the last 30 days?",
         "sql": f"""SELECT c.full_name, c.customer_id,
        COUNT(t.txn_id) AS fraud_count,
        ROUND(SUM(t.amount_gbp), 2) AS total_suspicious_gbp
@@ -288,7 +288,7 @@ print("Complete Option A (UI) first, then note your Genie Space ID for Module 07
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3a - Fetch Genie_Space_ID
+# DBTITLE 1,Step 5 - Fetch Genie_Space_ID
 from databricks.sdk import WorkspaceClient
 
 w = WorkspaceClient()
@@ -303,7 +303,7 @@ print(f"Genie Space ID for '{GENIE_NAME}': {genie_space_id}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3b — Test Genie Queries via API
+# DBTITLE 1,Step 6 — Test Genie Queries via API
 # ============================================================
 # After creating the Genie Space (Option A or B),
 # replace GENIE_SPACE_ID with your actual space ID.

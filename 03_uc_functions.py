@@ -35,8 +35,8 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Pre-Requisites
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
@@ -56,7 +56,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Create calculate_customer_risk Function
+# DBTITLE 1,Step 1a — Create calculate_customer_risk Function
 # Drop and recreate for idempotency
 spark.sql(f"DROP FUNCTION IF EXISTS {CATALOG}.{SCHEMA}.calculate_customer_risk")
 
@@ -84,7 +84,7 @@ RETURN (
       -- Age adjustment: reduce score slightly for customers over 60
       - CASE WHEN age > 60 THEN 5 ELSE 0 END
     AS INT)) AS risk_score
-  FROM databank_lab.financial_data.customers
+  FROM {CATALOG}.{SCHEMA}.customers
   WHERE customer_id = calculate_customer_risk.customer_id
 )""")
 
@@ -133,7 +133,7 @@ print(f"\n✅ Function registered: {[f.function for f in functions]}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Create get_portfolio_summary Function
+# DBTITLE 1,Step 2a — Create get_portfolio_summary Function
 # Step 2 — Create get_portfolio_summary (SQL UC Function)
 spark.sql(f"DROP FUNCTION IF EXISTS {CATALOG}.{SCHEMA}.get_portfolio_summary")
 
@@ -164,9 +164,9 @@ RETURN (
       '\\n\\nTotal Assets Under Management: £', FORMAT_NUMBER(SUM(a.balance_gbp), 2),
       '\\nNumber of Products: ', COUNT(a.account_id)
     )
-  FROM databank_lab.financial_data.customers c
-  LEFT JOIN databank_lab.financial_data.accounts a USING (customer_id)
-  LEFT JOIN databank_lab.financial_data.products p USING (product_id)
+  FROM {CATALOG}.{SCHEMA}.customers c
+  LEFT JOIN {CATALOG}.{SCHEMA}.accounts a USING (customer_id)
+  LEFT JOIN {CATALOG}.{SCHEMA}.products p USING (product_id)
   WHERE c.customer_id = get_portfolio_summary.customer_id
 )
 """)
@@ -209,7 +209,7 @@ print("\n✅ get_portfolio_summary is working")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Create flag_suspicious_transactions Function
+# DBTITLE 1,Step 3a — Create flag_suspicious_transactions Function
 spark.sql(f"DROP FUNCTION IF EXISTS {CATALOG}.{SCHEMA}.flag_suspicious_transactions")
 
 spark.sql(f"""
@@ -235,7 +235,7 @@ RETURN (
         WHEN amount_gbp > 1000  THEN 'LARGE AMOUNT'
         ELSE                         'ANOMALY'
       END AS alert_type
-    FROM databank_lab.financial_data.transactions
+    FROM {CATALOG}.{SCHEMA}.transactions
     WHERE customer_id  = flag_suspicious_transactions.customer_id
       AND txn_date    >= DATE_SUB(CURRENT_DATE(), lookback_days)
       AND (is_fraud = true OR amount_gbp > 1000)

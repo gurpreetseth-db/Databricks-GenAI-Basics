@@ -15,8 +15,8 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Pre-Requisites
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Paramters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
@@ -60,7 +60,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Knowledge Assistant Configuration
+# DBTITLE 1,Step 2 — Knowledge Assistant Configuration
 # ================================================================
 # CONFIGURATION — FILL IN YOUR IDs FROM EARLIER MODULES
 # ================================================================
@@ -120,7 +120,7 @@ print(f"🤖 Source Description : {SOURCE_DESCRIPTION}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Create Knowledge Assistant via UI
+# DBTITLE 1,Step 2a — Create Knowledge Assistant via UI
 # MAGIC %md
 # MAGIC ## 📚 Step 1: Create Knowledge Assistant (Document RAG)
 # MAGIC
@@ -139,12 +139,13 @@ print(f"🤖 Source Description : {SOURCE_DESCRIPTION}")
 # MAGIC
 # MAGIC ------------------------------------------------------------------------------------------------------------------------------
 # MAGIC
-# MAGIC ![](./img/KA-0.jpg)
-# MAGIC ![](./img/KA-1.jpg)
+# MAGIC | | |
+# MAGIC |---|---|
+# MAGIC | ![](./img/KA-0.jpg) | ![](./img/KA-1.jpg) |
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 - Supervisor Agent Configurations
+# DBTITLE 1,Step 3 - Supervisor Agent Configurations
 print(" ================================== ")
 print(" SUPERVISOR ASSISTANT CONFIGURATION ")
 print(" ================================== ")
@@ -185,7 +186,7 @@ print(f"🤖 Supervisor Instruction:{SUPERAGENT_INSTRUCTIONS}" )
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Create Supervisor Agent
+# DBTITLE 1,Step 3a — Create Supervisor Agent
 # MAGIC %md
 # MAGIC ## 🤖 Step 2: Assemble the Supervisor Agent
 # MAGIC
@@ -219,7 +220,7 @@ print(f"🤖 Supervisor Instruction:{SUPERAGENT_INSTRUCTIONS}" )
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Test Supervise Agent - Is it running
+# DBTITLE 1,Step 4 — Test Supervise Agent - Is it running
 from databricks.sdk import WorkspaceClient
 import time
 

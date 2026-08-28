@@ -3,8 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-# DBTITLE 1,Run Pre-Requisites
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
@@ -46,7 +46,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration
+# DBTITLE 1,Step 2 — Configuration
 # ================================================================
 # CONFIGURATION
 # ================================================================
@@ -66,7 +66,7 @@ except Exception:
     ]
 # Use the designated shared endpoint for this workspace
 
-VS_INDEX_NAME = f"{CATALOG}.{SCHEMA}.product_docs_index"
+#VS_INDEX_NAME = f"{CATALOG}.{SCHEMA}.product_docs_index"
 SOURCE_TABLE  = f"{CATALOG}.{SCHEMA}.product_docs_chunks"
 
 print(f"✅ VS Endpoint : {AI_VECTOR_SEARCH_ENDPOINT}")
@@ -75,9 +75,9 @@ print(f"📐 Embed Model  : {EMBEDDING_MODEL}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Parse and Chunk PDFs
+# DBTITLE 1,Step 4a — Parse and Chunk PDFs
 # MAGIC %md
-# MAGIC ## 📄 Step 1: Parse & Chunk PDF Documents
+# MAGIC ## 📄 Step 4a: Parse & Chunk PDF Documents
 # MAGIC
 # MAGIC **Chunking strategy matters.** Too large → irrelevant content pollutes results. Too small → loss of context.
 # MAGIC
@@ -92,12 +92,12 @@ print(f"📐 Embed Model  : {EMBEDDING_MODEL}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Extract and Chunk PDF Text
+# DBTITLE 1,Step 4a — Extract and Chunk PDF Text
 # MAGIC %pip install pypdf databricks-vectorsearch -q
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1b — Build Chunks DataFrame
+# DBTITLE 1,Step 4b — Build Chunks DataFrame
 import os, re
 from pypdf import PdfReader
 from pyspark.sql import functions as F
@@ -171,9 +171,9 @@ display(spark.table(SOURCE_TABLE).select("doc_name", "chunk_id", F.substring("ch
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Create Vector Search Index
+# DBTITLE 1,Step 5 — Create Vector Search Index
 # MAGIC %md
-# MAGIC ## 🔍 Step 2: Create Vector Search Index
+# MAGIC ## 🔍 Step 5: Create Vector Search Index
 # MAGIC
 # MAGIC **Delta Sync Index (managed embeddings)** is the easiest option:
 # MAGIC - You provide the source Delta table and column to embed
@@ -187,7 +187,7 @@ display(spark.table(SOURCE_TABLE).select("doc_name", "chunk_id", F.substring("ch
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Create VS Index
+# DBTITLE 1,Step 5 — Create VS Index
 import importlib, sys
 for _k in list(sys.modules.keys()):
     if _k == 'databricks' or _k.startswith('databricks.'):
@@ -235,7 +235,7 @@ print(f"   Status: {index.describe().get('status', {}).get('ready_for_query', 'u
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Test Semantic Search
+# DBTITLE 1,Step 6 — Test Semantic Search
 # Connect to the index for querying
 index = vsc.get_index(endpoint_name=AI_VECTOR_SEARCH_ENDPOINT, index_name=VS_INDEX_NAME)
 
@@ -267,7 +267,7 @@ search_docs("What is the difference between a Cash ISA and a Stocks and Shares I
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 4 — Verify Index
+# DBTITLE 1,Step 7 — Verify Index
 # Verify the index is ready for queries
 index_info = vsc.get_index(endpoint_name=AI_VECTOR_SEARCH_ENDPOINT, index_name=VS_INDEX_NAME)
 status = index_info.describe()

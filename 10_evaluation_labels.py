@@ -37,12 +37,19 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Pre-Requisties
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Upgrade MLflow
+# Traces from Module 09 were logged with MLflow 3.x — upgrade to read them
+%pip install --upgrade 'mlflow[databricks]>=3.0.0' -q
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration & Load Run
+# DBTITLE 1,Step 1 - Refer Parameters
+# MAGIC %run ./Config_Parameters
+
+# COMMAND ----------
+
+# DBTITLE 1,Step 2 — Configuration & Load Run
 from databricks.sdk import WorkspaceClient
 import mlflow
 
@@ -71,9 +78,9 @@ print(f"✅ Started at  : {runs.iloc[0]['start_time']}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Label Schema
+# DBTITLE 1,Step 3 — Label Schema
 # MAGIC %md
-# MAGIC ## 🏷️ Step 1: Label Schema
+# MAGIC ## 🏷️ Step 3: Label Schema
 # MAGIC
 # MAGIC MLflow GenAI scorers follow a consistent schema. Understanding the schema helps you:
 # MAGIC - Filter rows where the agent failed
@@ -105,16 +112,9 @@ print(f"✅ Started at  : {runs.iloc[0]['start_time']}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Upgrade MLflow
-# Traces from Module 09 were logged with MLflow 3.x — upgrade to read them
-%pip install --upgrade 'mlflow[databricks]>=3.0.0' -q
-dbutils.library.restartPython()
-
-# COMMAND ----------
-
-# DBTITLE 1,Step 3 — Human Labels
+# DBTITLE 1,Step 4 — Human Labels
 # MAGIC %md
-# MAGIC ## ✍️ Step 3: Adding Human Labels
+# MAGIC ## ✍️ Step 4: Adding Human Labels
 # MAGIC
 # MAGIC Automated labels from an LLM judge can be wrong — especially for domain-specific content like financial regulations. You can override or augment them with **human labels**.
 # MAGIC
@@ -136,7 +136,7 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 - Create DataBank Labelling Schema
+# DBTITLE 1,Step 4a - Create DataBank Labelling Schema
 import mlflow
 from mlflow.genai.label_schemas import create_label_schema, InputCategorical, InputText
 
@@ -234,7 +234,7 @@ for s in schemas:
 
 # COMMAND ----------
 
-# DBTITLE 1,Step - 2 Create Label Session
+# DBTITLE 1,Step - 4b Create Label Session
 import mlflow
 import mlflow.genai
 

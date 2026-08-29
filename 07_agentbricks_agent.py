@@ -307,7 +307,7 @@ else:
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Test Agent Scenarios
+# DBTITLE 1,Step 5 — Test Agent Scenarios
 import openai
 import requests
 

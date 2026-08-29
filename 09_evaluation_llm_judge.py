@@ -3,8 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
-# DBTITLE 1,Run Pre-Requisities
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
@@ -117,7 +117,7 @@ print(f"\n✅ LLM test complete (via {MODEL_TO_USE})")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 0 — Configuration & Imports
+# DBTITLE 1,Step 2 — Configuration & Imports
 # ================================================================
 # UPGRADE MLflow to fix import errors
 # ================================================================
@@ -149,7 +149,7 @@ print(f"\n✅ LLM test complete (via {MODEL_TO_USE})")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 1 — Create Evaluation Dataset
+# DBTITLE 1,Create Evaluation Dataset
 # Evaluation dataset: 25 curated Q&A pairs for the DataBank AI Advisor
 # expected_response = the ideal answer we expect from the agent
 # These serve as ground truth for the LLM judge
@@ -269,7 +269,7 @@ display(df_eval.head())
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Define Agent Wrapper for Evaluation
+# DBTITLE 1,Define Agent Wrapper for Evaluation
 # ================================================================
 # EVALUATION SETUP (self-contained after pip install restart)
 # Re-establishes LLM client (same as Cell 3) and defines predict_fn
@@ -357,9 +357,9 @@ print(f"   Model      : {MODEL_TO_USE}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Define Evaluation Scorers
+# DBTITLE 1,Step 2 — Define Evaluation Scorers
 # MAGIC %md
-# MAGIC ## ⚖️ Step 3: Define Evaluation Scorers
+# MAGIC ## ⚖️ Step 2: Define Evaluation Scorers
 # MAGIC
 # MAGIC We use **3 complementary scorers**:
 # MAGIC
@@ -377,7 +377,7 @@ print(f"   Model      : {MODEL_TO_USE}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 3 — Define and Run Evaluation
+# DBTITLE 1,Define and Run Evaluation
 from mlflow.genai.scorers import Guidelines, Safety, Correctness
 
 # ================================================================
@@ -440,7 +440,7 @@ print(f"   Results logged to experiment: {experiment_name}")
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 4 — Analyse Results
+# DBTITLE 1,Step 5 — Analyse Results
 # Display summary metrics
 if eval_results and hasattr(eval_results, 'metrics'):
     metrics = eval_results.metrics
@@ -477,7 +477,7 @@ if eval_results and hasattr(eval_results, 'tables'):
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 5 — Score by Category
+# DBTITLE 1,Step 6 — Score by Category
 # Analyse performance by category to identify which tool needs improvement
 
 if eval_results and hasattr(eval_results, 'tables'):

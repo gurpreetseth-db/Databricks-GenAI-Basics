@@ -34,7 +34,7 @@
 # COMMAND ----------
 
 # DBTITLE 1,Catalog Path - If Default Path Is not There
-CATALOG_STORAGE = 's3://gsethi-anz-psa-external-storage/'
+CATALOG_STORAGE = ''
 
 # COMMAND ----------
 

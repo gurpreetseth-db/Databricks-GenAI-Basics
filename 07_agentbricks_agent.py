@@ -113,10 +113,9 @@ print(" KNOWLEDGE ASSISTANT CONFIGURATION ")
 print(" ================================= ")
 print(f"🤖 KA Name            : {KA_NAME}")
 print(f"🤖 KA Descriptiom     : {DESCRIPTION}")
-print(f"🤖 Instructions       : {INSTRUCTIONS}")
 print(f"🤖 Source File Name   : {FILE_NAME}")
 print(f"🤖 Source Description : {SOURCE_DESCRIPTION}")
-
+print(f"🤖 Instructions       : {INSTRUCTIONS}")
 
 # COMMAND ----------
 
@@ -249,34 +248,40 @@ def wait_for_endpoint(endpoint_name: str, timeout_seconds: int = 300) -> bool:
 
 def get_superagent_endpoint_name(superagent_name):
     _w = WorkspaceClient()
-    normalise = lambda s: s.lower().replace("-", "").replace("_", "").replace(" ", "")
-    all_eps   = list(_w.serving_endpoints.list())
-    
-    # 1. Exact name match
+    my_email = _w.current_user.me().user_name
+    all_eps  = list(_w.serving_endpoints.list())
+
+    # 1. Exact endpoint name match
     endpoint_name = next((ep.name for ep in all_eps if ep.name == superagent_name), None)
-    
-    # 2. Fuzzy match (normalised agent name appears inside endpoint name
+
+    # 2. Fuzzy match — normalised agent name appears inside an endpoint name
     if not endpoint_name:
+        normalise = lambda s: s.lower().replace("-", "").replace("_", "").replace(" ", "")
         term = normalise(superagent_name)
         endpoint_name = next((ep.name for ep in all_eps if term in normalise(ep.name)), None)
-    
-    # 3. AgentBricks fallback — supervisor agent endpoints are always named mas-<uuid>-endpoint
+
+    # 3. AgentBricks fallback — MAS endpoints owned by the current user
     if not endpoint_name:
-        mas_eps = [ep.name for ep in all_eps
-            if ep.name.startswith("mas-") and ep.name.endswith("-endpoint")]
-        if len(mas_eps) == 1:
-            endpoint_name = mas_eps[0]
-        elif len(mas_eps) > 1:
-            print(f"⚠️  Multiple AgentBricks supervisor endpoints found.")
-            print(f"   Update SUPERAGENT_NAME in cell 5 to one of:")
-            for n in mas_eps:
-                print(f"   {n}")
+        my_mas_eps = [ep.name for ep in all_eps
+                      if ep.name.startswith("mas-") and ep.name.endswith("-endpoint")
+                      and getattr(ep, "creator", None) == my_email]
+        if len(my_mas_eps) == 1:
+            endpoint_name = my_mas_eps[0]
+            print(f"✅ Matched your MAS endpoint by creator ({my_email})")
+        elif len(my_mas_eps) > 1:
+            print(f"⚠️  Multiple MAS endpoints found for {my_email}:")
+            for n in my_mas_eps:
+                print(f"     {n}")
+            print("   Using the first one. Set ENDPOINTNAME manually if this is wrong.")
+            endpoint_name = my_mas_eps[0]
 
     if endpoint_name:
         print(f"Supervisor Agent Name : {superagent_name}")
         print(f"Endpoint Name         : {endpoint_name}")
     else:
         print(f"⚠️  Could not resolve endpoint for '{superagent_name}'")
+        print(f"   No MAS endpoints found for creator {my_email}.")
+        print(f"   Create the Supervisor Agent first (Step 3a), then re-run.")
 
     return endpoint_name
 
@@ -417,5 +422,5 @@ print(f"\n{'='*65}")
 # MAGIC (used in Module 08 and Module 09)
 # MAGIC ```
 # MAGIC
-# MAGIC ### 🚀 Next: Module 08 — Databricks App
-# MAGIC Open **`08_databricks_app`** to deploy the agent as a live Gradio chat application.
+# MAGIC ### 🚀 Next: Module 08 — Playground Deploy Databricks App
+# MAGIC Open **`08_Playground_Deploy_App`** to deploy the agent as a live Gradio chat application.

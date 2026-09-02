@@ -66,9 +66,9 @@ print(f"📍 Gateway route name: {AI_GW_ROUTE}")
 # MAGIC   AI Gateway Route (databank-llm-route)
 # MAGIC   ├── Rate Limiter:   100 requests/min/user
 # MAGIC   ├── PII Guardrail:  Block customer data from leaving workspace  
-# MAGIC   ├── Usage Tracker:  Log to databank_lab.financial_data.ai_inference_log
+# MAGIC   ├── Usage Tracker:  Log to <CATALOG>.financial_data.ai_inference_log
 # MAGIC   └── Router:
-# MAGIC        └── Primary: databricks-meta-llama-3-3-70b-instruct
+# MAGIC        └── Primary: system.ai.gemma-3-12b
 # MAGIC               (Databricks Foundation Models — pay-per-token, no key needed)
 # MAGIC ```
 # MAGIC

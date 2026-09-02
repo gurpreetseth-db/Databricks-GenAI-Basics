@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # DBTITLE 1,Module 08 — Welcome
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Module 08: Databricks Apps (Gradio)
@@ -43,8 +47,8 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Run Pre-Requisites
-# MAGIC %run ./00_setup_prerequisites
+# DBTITLE 1,Step 1 - Reference Parameters
+# MAGIC %run ./Config_Parameters
 
 # COMMAND ----------
 
@@ -57,41 +61,49 @@ import time
 
 user = spark.sql("SELECT current_user() AS username").collect()[0]['username']
 
-AGENT_ENDPOINT = "gurpreetsethi_DataBank-AI-Advisor"  # From Module 07
-APP_NAME       = "databank-ai-advisor-app"
+#AGENT_ENDPOINT = "gurpreetsethi_DataBank-AI-Advisor"  # From Module 07
+APP_NAME       = f"{username_clean}-databank-ai-app"
 APP_DIR        = f"/Workspace/Users/{user}/databank-ai-lab/app"
 
 
 def get_superagent_endpoint_name(superagent_name):
     _w = WorkspaceClient()
-    normalise = lambda s: s.lower().replace("-", "").replace("_", "").replace(" ", "")
-    all_eps   = list(_w.serving_endpoints.list())
-    
-    # 1. Exact name match
+    my_email = _w.current_user.me().user_name
+    all_eps  = list(_w.serving_endpoints.list())
+
+    # 1. Exact endpoint name match
     endpoint_name = next((ep.name for ep in all_eps if ep.name == superagent_name), None)
-    
-    # 2. Fuzzy match (normalised agent name appears inside endpoint name
+
+    # 2. Fuzzy match — normalised agent name appears inside an endpoint name
     if not endpoint_name:
+        normalise = lambda s: s.lower().replace("-", "").replace("_", "").replace(" ", "")
         term = normalise(superagent_name)
         endpoint_name = next((ep.name for ep in all_eps if term in normalise(ep.name)), None)
-  
-    # 3. AgentBricks fallback — supervisor agent endpoints are always named mas-<uuid>-endpoint
+
+    # 3. AgentBricks fallback — MAS endpoints owned by the current user
     if not endpoint_name:
-        mas_eps = [ep.name for ep in all_eps
-            if ep.name.startswith("mas-") and ep.name.endswith("-endpoint")]
-    if len(mas_eps) == 1:
-        endpoint_name = mas_eps[0]
-    elif len(mas_eps) > 1:
-        print(f"⚠️  Multiple AgentBricks supervisor endpoints found.")
-        print(f"   Update superagent_name in cell 5 to one of:")
-        for n in mas_eps:
-            print(f"   {n}")
+        my_mas_eps = [ep.name for ep in all_eps
+                      if ep.name.startswith("mas-") and ep.name.endswith("-endpoint")
+                      and getattr(ep, "creator", None) == my_email]
+        if len(my_mas_eps) == 1:
+            endpoint_name = my_mas_eps[0]
+            print(f"✅ Matched your MAS endpoint by creator ({my_email})")
+        elif len(my_mas_eps) > 1:
+            print(f"⚠️  Multiple MAS endpoints found for {my_email}:")
+            for n in my_mas_eps:
+                print(f"     {n}")
+            print("   Using the first one. Set ENDPOINTNAME manually if this is wrong.")
+            endpoint_name = my_mas_eps[0]
 
     if endpoint_name:
-        ENDPOINTNAME = endpoint_name          # available for downstream cells
-        return ENDPOINTNAME
+        print(f"Supervisor Agent Name : {superagent_name}")
+        print(f"Endpoint Name         : {endpoint_name}")
     else:
-        print(f"⚠️  Could not resolve endpoint for '{AGENT_ENDPOINT}'")
+        print(f"⚠️  Could not resolve endpoint for '{superagent_name}'")
+        print(f"   No MAS endpoints found for creator {my_email}.")
+        print(f"   Create the Supervisor Agent first (Step 3a), then re-run.")
+
+    return endpoint_name
 
 endpoint_name= get_superagent_endpoint_name(AGENT_ENDPOINT)
 
@@ -321,7 +333,7 @@ env:
   - name: AGENT_ENDPOINT_NAME
     value: {endpoint_name}
   - name: AI_GATEWAY_ENDPOINT
-    value: {AI_GATEWAY_ENDPOINT_NAME}
+    value: {CATALOG}.{SCHEMA}.{AI_GW_ROUTE}
 
 resources:
   - name: agent-serving-endpoint
@@ -330,7 +342,7 @@ resources:
       permission: CAN_QUERY
   - name: ai-gateway-endpoint
     serving_endpoint:
-      name: {AI_GATEWAY_ENDPOINT_NAME}
+      name: {CATALOG}.{SCHEMA}.{AI_GW_ROUTE}
       permission: CAN_QUERY
 '''
 

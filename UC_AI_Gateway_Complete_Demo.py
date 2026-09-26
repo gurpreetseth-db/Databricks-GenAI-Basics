@@ -347,7 +347,7 @@ service_policies = [
         "handler": "system.ai.block_unsafe_content",
         "rank": 1,
         "options": {
-            "model_service": "model-services/system.ai.gpt-5-2",  # judge model
+            "model_service": "model-services/system.ai.claude-sonnet-4-5",  # judge model
             "dry_run": "false",
             "phases": "pre_call,post_call",
         },
@@ -482,7 +482,6 @@ print(f"\n➡️  Query it below (data appears within ~minutes of requests).")
 # MAGIC -- Table = <catalog>.<schema>.<model_service_name>_payload
 # MAGIC SELECT *
 # MAGIC FROM gurpreetsethi_databank_lab.gurpreetsethi_financial_data.`gurpreetsethi-databank-llm-route_payload`
-# MAGIC ORDER BY 1 DESC
 # MAGIC LIMIT 10
 
 # COMMAND ----------

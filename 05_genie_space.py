@@ -43,7 +43,7 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Step 2 — Configuration
+# DBTITLE 1,Step 2 — Configuration - Add Tables
 # ================================================================
 # CONFIGURATION
 # ================================================================
@@ -64,115 +64,6 @@ print(f"📊 Tables to connect:")
 for t in TABLES:
     count = spark.table(t).count()
     print(f"   ✓ {t} ({count:,} rows)")
-
-# COMMAND ----------
-
-# DBTITLE 1,Option A — UI Walkthrough
-# MAGIC %md
-# MAGIC ## 🖼️ Option A: Create Genie Space via the UI
-# MAGIC
-# MAGIC Follow these steps exactly:
-# MAGIC
-# MAGIC ### 1. Navigate to Genie
-# MAGIC - In the left sidebar, click **Genie** (sparkle/wand icon)
-# MAGIC - Click **Create Genie space** (top right button)
-# MAGIC
-# MAGIC ### 2. Connect Tables
-# MAGIC In the table selector panel, add all 5 tables:
-# MAGIC - `databank_lab.financial_data.customers`
-# MAGIC - `databank_lab.financial_data.accounts`
-# MAGIC - `databank_lab.financial_data.transactions`
-# MAGIC - `databank_lab.financial_data.products`
-# MAGIC - `databank_lab.financial_data.support_tickets`
-# MAGIC
-# MAGIC ### 3. Set the Space Name
-# MAGIC | Field | Value |
-# MAGIC |-------|-------|
-# MAGIC | **Name** | `DataBank Financial Advisor` |
-# MAGIC | **Description** | `AI-powered SQL assistant for DataBank financial advisors` |
-# MAGIC
-# MAGIC ### 4. Add Instructions
-# MAGIC In the **Instructions** field, paste the text from **Step 1** (run the cell, then copy the output).
-# MAGIC
-# MAGIC ### 5. Add Sample Questions (Certified Queries)
-# MAGIC In the **Sample Questions** panel, add each query from **Step 2** (run the cell to see them).
-# MAGIC
-# MAGIC ### 6. Click Save
-# MAGIC The space will be available immediately for queries.
-
-# COMMAND ----------
-
-# DBTITLE 1,Option B — Scripted Creation (API)
-# MAGIC %md
-# MAGIC ## 🐍 Option B: Create Genie Space via API (Scripted)
-# MAGIC
-# MAGIC The cell below creates the Genie Space programmatically.
-# MAGIC This is commented out by default — **run Option A first**, then use this for reference or automation.
-# MAGIC
-# MAGIC **Use case for Option B:**
-# MAGIC - Setting up the lab for multiple participants automatically
-# MAGIC - CI/CD pipeline that recreates the Genie Space on data refresh
-# MAGIC - Migrating Genie Spaces between workspaces
-
-# COMMAND ----------
-
-# DBTITLE 1,Option B — Create Genie Space (API)
-# ============================================================
-# OPTION B: Programmatic Genie Space creation via REST API
-# Uncomment to run. Requires Admin or Space Creator permissions.
-# ============================================================
-
-import json
-from databricks.sdk import WorkspaceClient
-
-w = WorkspaceClient()
-
-# Get the first available SQL warehouse
-warehouses = w.warehouses.list()
-warehouse_id = None
-for wh in warehouses:
-    if wh.state and wh.state.value in ("RUNNING", "STARTING"):
-        warehouse_id = wh.id
-        break
-    if wh.id:
-        warehouse_id = wh.id  # fallback to any warehouse
-
-if not warehouse_id:
-    print("WARNING: No SQL warehouse found. Please create one and re-run this cell.")
-else:
-    table_identifiers = TABLES
-    
-    # Check if a Genie Space with this title already exists
-    existing_spaces = w.api_client.do("GET", "/api/2.0/genie/spaces")
-    genie_space_id = None
-    for space in existing_spaces.get("spaces", []):
-        if space.get("title") == GENIE_NAME:
-            genie_space_id = space.get("space_id")
-            print(f"Genie Space '{GENIE_NAME}' already exists (ID: {genie_space_id})")
-            break
-
-    if not genie_space_id:
-        print(f"Creating Geneie Space '{GENIE_NAME}'...")
-        serialized = json.dumps({
-            "version": 2,
-            "data_sources": {"tables": [{"identifier": t} for t in sorted(table_identifiers)]}
-        })
-        try:
-            resp = w.api_client.do("POST", "/api/2.0/genie/spaces", body={
-                "title": GENIE_NAME,
-                "description": "AI-powered SQL assistant for DataBank financial advisors",
-                "warehouse_id": warehouse_id,
-                "instructions": instructions,
-                "serialized_space": serialized,
-            })
-            genie_space_id = resp.get("space_id")
-            print(f"Genie Space created (ID: {genie_space_id})")
-        except Exception as e:
-            print(f"Error creating Genie Space: {e}")
-
-print("=================================================================")
-print("Add Instructions and Sample Questions next to Complete the Setup")
-print("Complete Option A (UI) first, then note your Genie Space ID for Module 07.")
 
 # COMMAND ----------
 
@@ -285,6 +176,115 @@ for i, q in enumerate(queries, 1):
 print("\n" + "-"*65)
 print("ADD EACH QUESTION ABOVE AS A SAMPLE QUESTION IN THE GENIE SPACE")
 print("For best results, also add the SQL as the 'Certified Query' for each question.")
+
+# COMMAND ----------
+
+# DBTITLE 1,Option A — UI Walkthrough
+# MAGIC %md
+# MAGIC ## 🖼️ Option A: Create Genie Space via the UI
+# MAGIC
+# MAGIC Follow these steps exactly:
+# MAGIC
+# MAGIC ### 1. Navigate to Genie
+# MAGIC - In the left sidebar, click **Genie** (sparkle/wand icon)
+# MAGIC - Click **Create Genie space** (top right button)
+# MAGIC
+# MAGIC ### 2. Connect Tables
+# MAGIC In the table selector panel, add all 5 tables:
+# MAGIC - `databank_lab.financial_data.customers`
+# MAGIC - `databank_lab.financial_data.accounts`
+# MAGIC - `databank_lab.financial_data.transactions`
+# MAGIC - `databank_lab.financial_data.products`
+# MAGIC - `databank_lab.financial_data.support_tickets`
+# MAGIC
+# MAGIC ### 3. Set the Space Name
+# MAGIC | Field | Value |
+# MAGIC |-------|-------|
+# MAGIC | **Name** | `DataBank Financial Advisor` |
+# MAGIC | **Description** | `AI-powered SQL assistant for DataBank financial advisors` |
+# MAGIC
+# MAGIC ### 4. Add Instructions
+# MAGIC In the **Instructions** field, paste the text from **Step 1** (run the cell, then copy the output).
+# MAGIC
+# MAGIC ### 5. Add Sample Questions (Certified Queries)
+# MAGIC In the **Sample Questions** panel, add each query from **Step 2** (run the cell to see them).
+# MAGIC
+# MAGIC ### 6. Click Save
+# MAGIC The space will be available immediately for queries.
+
+# COMMAND ----------
+
+# DBTITLE 1,Option B — Scripted Creation (API)
+# MAGIC %md
+# MAGIC ## 🐍 Option B: Create Genie Space via API (Scripted)
+# MAGIC
+# MAGIC The cell below creates the Genie Space programmatically.
+# MAGIC This is commented out by default — **run Option A first**, then use this for reference or automation.
+# MAGIC
+# MAGIC **Use case for Option B:**
+# MAGIC - Setting up the lab for multiple participants automatically
+# MAGIC - CI/CD pipeline that recreates the Genie Space on data refresh
+# MAGIC - Migrating Genie Spaces between workspaces
+
+# COMMAND ----------
+
+# DBTITLE 1,Option B — Create Genie Space (API)
+# ============================================================
+# OPTION B: Programmatic Genie Space creation via REST API
+# Uncomment to run. Requires Admin or Space Creator permissions.
+# ============================================================
+
+import json
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient()
+
+# Get the first available SQL warehouse
+warehouses = w.warehouses.list()
+warehouse_id = None
+for wh in warehouses:
+    if wh.state and wh.state.value in ("RUNNING", "STARTING"):
+        warehouse_id = wh.id
+        break
+    if wh.id:
+        warehouse_id = wh.id  # fallback to any warehouse
+
+if not warehouse_id:
+    print("WARNING: No SQL warehouse found. Please create one and re-run this cell.")
+else:
+    table_identifiers = TABLES
+    
+    # Check if a Genie Space with this title already exists
+    existing_spaces = w.api_client.do("GET", "/api/2.0/genie/spaces")
+    genie_space_id = None
+    for space in existing_spaces.get("spaces", []):
+        if space.get("title") == GENIE_NAME:
+            genie_space_id = space.get("space_id")
+            print(f"Genie Space '{GENIE_NAME}' already exists (ID: {genie_space_id})")
+            break
+
+    if not genie_space_id:
+        print(f"Creating Geneie Space '{GENIE_NAME}'...")
+        serialized = json.dumps({
+            "version": 2,
+            "data_sources": {"tables": [{"identifier": t} for t in sorted(table_identifiers)]}
+        })
+        try:
+            resp = w.api_client.do("POST", "/api/2.0/genie/spaces", body={
+                "title": GENIE_NAME,
+                "description": "AI-powered SQL assistant for DataBank financial advisors",
+                "warehouse_id": warehouse_id,
+                "instructions": instructions,
+                "serialized_space": serialized,
+            })
+            genie_space_id = resp.get("space_id")
+            print(f"Genie Space created (ID: {genie_space_id})")
+        except Exception as e:
+            print(f"Error creating Genie Space: {e}")
+
+print("=================================================================")
+print("Add Instructions and Sample Questions next to Complete the Setup")
+print("Complete Option A (UI) first, then note your Genie Space ID for Module 07.")
 
 # COMMAND ----------
 

@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.databricks/
+
+# Node / frontend build
+node_modules/
+dist/
+.next/
+.turbo/
+*.log
+backend.log
+frontend.log
+
+# Generated at deploy time from Config_Parameters.py (never hand-edited)
+app.yaml
+
+# Local env + OS
+.env
+.DS_Store
+test-results/
+playwright-report/

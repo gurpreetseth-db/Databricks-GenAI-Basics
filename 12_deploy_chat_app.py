@@ -3,21 +3,20 @@
 # MAGIC # 12 — Deploy the DataBank Chat App (3 memory modes)
 # MAGIC
 # MAGIC One app — **`databank-chat-demo`** — deployed in whichever memory mode you pick.
-# MAGIC All three modes use the **same** UC AI Gateway route (Claude Sonnet 4.5), UC
-# MAGIC functions, Genie Agent, and Vector Search index from `Config_Parameters`.
+# MAGIC **You only choose the mode here.** Everything else (app name, model route, Genie
+# MAGIC space, functions, Lakebase, experiment) resolves automatically from
+# MAGIC `Config_Parameters.py` — the single source of truth. `app.yaml` is generated from
+# MAGIC those values at deploy time (never hand-edited).
 # MAGIC
 # MAGIC | Mode | Chat history | Agent memory |
 # MAGIC |------|--------------|--------------|
-# MAGIC | `simple`    | none (ephemeral)                | none |
+# MAGIC | `simple`    | none (ephemeral)                     | none |
 # MAGIC | `shortterm` | this session only (resets on reopen) | conversation log in Lakebase |
-# MAGIC | `longterm`  | all past sessions (per user)    | + durable fact recall across sessions |
-# MAGIC
-# MAGIC The app code lives in the **`databank-chat-demo/`** folder next to this notebook.
-# MAGIC This notebook just resolves config + calls `databank-chat-demo/deploy_app.py`.
+# MAGIC | `longterm`  | all past sessions (per user)         | + durable fact recall across sessions |
 
 # COMMAND ----------
 
-# MAGIC %md ### 1. Load the shared lab configuration
+# MAGIC %md ### 1. Load the shared lab configuration (single source of truth)
 
 # COMMAND ----------
 
@@ -25,41 +24,34 @@
 
 # COMMAND ----------
 
-# MAGIC %md ### 2. Pick the memory mode
+# MAGIC %md ### 2. Pick the memory mode (the only choice you make)
 
 # COMMAND ----------
 
 dbutils.widgets.dropdown("mode", "simple", ["simple", "shortterm", "longterm"], "Memory mode")
-dbutils.widgets.text("app_name", "databank-chat-demo", "App name")
-dbutils.widgets.text("genie_space_id", "01f1b6c9b5ad17bca4c13c1991f01333", "Genie space id")
-
 MODE = dbutils.widgets.get("mode")
-APP_NAME = dbutils.widgets.get("app_name")
-GENIE_SPACE_ID = dbutils.widgets.get("genie_space_id")
 
 # COMMAND ----------
 
-# MAGIC %md ### 3. Resolve UC-qualified names from Config_Parameters
+# MAGIC %md ### 3. Everything else resolves from Config_Parameters.py
 
 # COMMAND ----------
 
 import mlflow
 
-# The AI Gateway route is registered as a UC model-service (3-level name).
-MODEL_ROUTE = f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}"
-VECTOR_INDEX = VS_INDEX_NAME  # already 3-level in Config_Parameters
-
 # Resolve the MLflow experiment id from the experiment path in Config_Parameters
 _exp = mlflow.get_experiment_by_name(experiment_name)
 EXPERIMENT_ID = _exp.experiment_id if _exp else ""
 
-print("Mode         :", MODE)
-print("App          :", APP_NAME)
+print("Mode          :", MODE)
+print("App           :", APP_NAME)
 print("Catalog.Schema:", f"{CATALOG}.{SCHEMA}")
-print("Model route  :", MODEL_ROUTE)
-print("Vector index :", VECTOR_INDEX)
-print("Genie space  :", GENIE_SPACE_ID, f"({GENIE_NAME})")
-print("Experiment id:", EXPERIMENT_ID)
+print("Model route   :", MODEL_ROUTE)
+print("Vector index  :", VS_INDEX_NAME)
+print("Genie         :", GENIE_SPACE_ID, f"({GENIE_NAME})")
+print("UC functions  :", ", ".join(UC_FUNCTIONS))
+print("Lakebase      :", f"{LAKEBASE_PROJECT}/{LAKEBASE_BRANCH}/{LAKEBASE_ENDPOINT}")
+print("Experiment id :", EXPERIMENT_ID)
 
 # COMMAND ----------
 
@@ -72,23 +64,28 @@ print("Experiment id:", EXPERIMENT_ID)
 
 import os
 
-# Export resolved config so the %sh cell can read it
+# Export the resolved config so the %sh cell can consume it (all values originate
+# from Config_Parameters.py — nothing is defined here except the chosen mode).
 os.environ["DBK_MODE"] = MODE
 os.environ["DBK_APP_NAME"] = APP_NAME
 os.environ["DBK_CATALOG"] = CATALOG
 os.environ["DBK_SCHEMA"] = SCHEMA
 os.environ["DBK_MODEL_ROUTE"] = MODEL_ROUTE
-os.environ["DBK_VECTOR_INDEX"] = VECTOR_INDEX
+os.environ["DBK_VECTOR_INDEX"] = VS_INDEX_NAME
 os.environ["DBK_GENIE_SPACE_ID"] = GENIE_SPACE_ID
 os.environ["DBK_GENIE_NAME"] = GENIE_NAME
+os.environ["DBK_UC_FUNCTIONS"] = ",".join(UC_FUNCTIONS)
 os.environ["DBK_EXPERIMENT_ID"] = EXPERIMENT_ID
+os.environ["DBK_LAKEBASE_PROJECT"] = LAKEBASE_PROJECT
+os.environ["DBK_LAKEBASE_BRANCH"] = LAKEBASE_BRANCH
+os.environ["DBK_LAKEBASE_ENDPOINT"] = LAKEBASE_ENDPOINT
+os.environ["DBK_LAKEBASE_DATABASE"] = LAKEBASE_DATABASE
 os.environ["DBK_APP_DIR"] = os.path.join(os.getcwd(), "databank-chat-demo")
 
 # COMMAND ----------
 
 # MAGIC %sh
 # MAGIC set -e
-# MAGIC # Ensure the Databricks CLI is available
 # MAGIC if ! command -v databricks >/dev/null 2>&1; then
 # MAGIC   echo "Installing Databricks CLI..."
 # MAGIC   curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
@@ -103,15 +100,19 @@ os.environ["DBK_APP_DIR"] = os.path.join(os.getcwd(), "databank-chat-demo")
 # MAGIC   --vector-index "$DBK_VECTOR_INDEX" \
 # MAGIC   --genie-space-id "$DBK_GENIE_SPACE_ID" \
 # MAGIC   --genie-name "$DBK_GENIE_NAME" \
-# MAGIC   --experiment-id "$DBK_EXPERIMENT_ID"
+# MAGIC   --uc-functions "$DBK_UC_FUNCTIONS" \
+# MAGIC   --experiment-id "$DBK_EXPERIMENT_ID" \
+# MAGIC   --lakebase-project "$DBK_LAKEBASE_PROJECT" \
+# MAGIC   --lakebase-branch "$DBK_LAKEBASE_BRANCH" \
+# MAGIC   --lakebase-endpoint "$DBK_LAKEBASE_ENDPOINT" \
+# MAGIC   --lakebase-database "$DBK_LAKEBASE_DATABASE"
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### Notes
-# MAGIC - **Switch modes:** change the `mode` widget and re-run — it redeploys the same app.
-# MAGIC - **Local alternative:** from a clone, run
-# MAGIC   `python databank-chat-demo/deploy_app.py --mode <mode> --profile <profile>`.
-# MAGIC - **short/long term** additionally grant the app's service principal
-# MAGIC   `CONNECT`+`CREATE` on the Lakebase `agentic-memory` database (handled by
-# MAGIC   `deploy_app.py`). The frontend + agent then create their own schemas.
+# MAGIC - **Switch modes:** change the `mode` widget and re-run — same app, redeployed.
+# MAGIC - **Change any config value:** edit `Config_Parameters.py` only. `app.yaml` is
+# MAGIC   regenerated from it on every deploy (it is gitignored / not hand-maintained).
+# MAGIC - **Local alternative:** `python databank-chat-demo/deploy_app.py --mode <mode>
+# MAGIC   --profile <profile> --catalog ... --schema ...` (pass the same values).

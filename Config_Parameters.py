@@ -72,9 +72,9 @@ AI_GW_ROUTE    = f"{username_clean}-databank-llm-route"
 AGENT_ENDPOINT = f"{username_clean}-databank-ai-advisor"
 
 # Foundation Model used throughout the lab (no API key needed — hosted by Databricks)
-FOUNDATION_MODEL = "system.ai.gemma-3-12b"
+FOUNDATION_MODEL = "system.ai.databricks-claude-sonnet-4-5"
 EMBEDDING_MODEL  = "gte_large_en_v1_5"
-FALLBACK_MODEL   = "system.ai.databricks-kimi-k3"
+FALLBACK_MODEL   = "system.ai.femma-3-12b-it"
 
 # Genie Name
 GENIE_NAME   = f"{username_clean}-DataBank-Financial-Advisor"
@@ -132,7 +132,7 @@ LAKEBASE_DATABASE = "databricks_postgres"
 
 # Genie space id — auto-resolved from GENIE_NAME. Falls back to the explicit id
 # if the lookup API is unavailable, so this cell never breaks the config.
-GENIE_SPACE_ID = "01f1b6c9b5ad17bca4c13c1991f01333"
+GENIE_SPACE_ID = ""
 try:
     from databricks.sdk import WorkspaceClient
     _w = WorkspaceClient()

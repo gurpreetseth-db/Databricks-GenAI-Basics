@@ -239,11 +239,13 @@ It contrasts this new API against the older serving-endpoint `ai_gateway` block.
 
 The whole repo is a **Databricks Asset Bundle** (`databricks.yml`). One command
 uploads the entire codebase (notebooks, `Config_Parameters.py`, `lib/`, `img/`,
-and the `databank-chat-demo` app) to the workspace and provisions:
+and the `databank-chat-demo` app) to the workspace and provisions the
+**`databank-chat-demo`** Databricks App (+ its UC-function / Vector-Search /
+Genie resource bindings).
 
-- the **`databank-chat-demo`** Databricks App (+ its UC-function / Vector-Search /
-  Genie resource bindings), and
-- a **`databank_lab_setup`** Job that runs the setup notebooks (00→07) in order.
+> Run the lab notebooks (00→10) **yourself, interactively** to create the
+> underlying assets (catalog/schema, UC functions, Vector Search index, Genie
+> space, MLflow experiment), then deploy the app with the bundle.
 
 ### The three memory modes are bundle *targets*
 
@@ -256,18 +258,17 @@ and the `databank-chat-demo` app) to the workspace and provisions:
 ### Deploy (from the repo root)
 
 ```bash
-# 1) Deploy code + app + setup job for the mode you want:
+# (first: run notebooks 00→10 interactively to create the lab assets)
+
+# 1) Deploy code + app for the mode you want:
 databricks bundle deploy -t dev_longterm -p Myenv
 
-# 2) (optional) Provision the lab assets by running the setup notebooks:
-databricks bundle run databank_lab_setup -t dev_longterm -p Myenv
-
-# 3) Apply the app env + grants DAB can't express, then redeploy the app:
+# 2) Apply the app env + grants DAB can't express, then redeploy the app:
 python databank-chat-demo/deploy_app.py -t dev_longterm -p Myenv
 ```
 
 Or run the **`12_deploy_chat_app.py`** notebook in the workspace: pick the `mode`
-widget and Run All — it performs steps 1 and 3 for you.
+widget and Run All — it performs both steps for you.
 
 ### Why the two-step deploy?
 
@@ -287,8 +288,9 @@ Names/derivations live in `databricks.yml` `variables:` (mirroring
 `databricks bundle summary`, so the two never drift. For another user or
 workspace, override at deploy time — e.g. `--var username=jdoe`.
 
-> **Note:** `05_genie_space` and `08_Playground_Deploy_App` involve manual UI
-> steps and are **not** in the setup Job — run those interactively.
+> **Note:** the lab notebooks are meant to be run **interactively** (some, like
+> `05_genie_space` and `08_Playground_Deploy_App`, involve manual UI steps). The
+> bundle deploys code + the app; it does not run the notebooks for you.
 
 ---
 

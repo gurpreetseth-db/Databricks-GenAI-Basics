@@ -117,7 +117,8 @@ os.environ["DBK_BUNDLE_DIR"] = os.getcwd()  # repo root — where databricks.yml
 # MAGIC - **Change any config value:** edit `Config_Parameters.py` (notebook overrides)
 # MAGIC   or the `variables:` defaults in `databricks.yml`. The bundle is the single
 # MAGIC   source of truth; `deploy_app.py` reads resolved values from it.
-# MAGIC - **Provision the lab (optional):** `databricks bundle run databank_lab_setup -t <target>`
-# MAGIC   runs the setup notebooks (00→07) on serverless compute.
+# MAGIC - **Prerequisite:** run the lab notebooks (00→10) yourself to create the
+# MAGIC   catalog/schema, UC functions, Vector Search index, Genie space and experiment
+# MAGIC   before deploying the app.
 # MAGIC - **Local alternative:** from the repo root, `databricks bundle deploy -t dev_<mode>
 # MAGIC   -p <profile>` then `python databank-chat-demo/deploy_app.py -t dev_<mode> -p <profile>`.

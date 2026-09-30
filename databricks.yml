@@ -3,9 +3,9 @@
 # =============================================================================
 # `databricks bundle deploy` uploads the ENTIRE codebase (lab notebooks 00-12,
 # Config_Parameters.py, lib/, img/, and the databank-chat-demo app) to the
-# workspace, and provisions:
-#   * the `databank-chat-demo` Databricks App (+ its UC/Genie resource bindings)
-#   * a `databank_lab_setup` Job that runs the lab-setup notebooks in order
+# workspace and provisions the `databank-chat-demo` Databricks App (+ its
+# UC-function / Vector-Search / Genie resource bindings). Run the lab notebooks
+# yourself (interactively) to create the underlying assets, then deploy the app.
 #
 # The app's MEMORY MODE (simple | shortterm | longterm) is chosen by TARGET:
 #   databricks bundle deploy -t dev_simple    -p Myenv
@@ -98,42 +98,6 @@ resources:
             name: genie_space
             space_id: ${var.genie_space_id}
             permission: CAN_RUN
-
-  jobs:
-    databank_lab_setup:
-      name: "[${bundle.target}] DataBank lab setup"
-      # Runs the automatable lab-setup notebooks in order on serverless compute.
-      # (08_Playground_Deploy_App and 05_genie_space involve manual UI steps — do
-      # those interactively; see the README.) Notebook paths are relative to the
-      # bundle root and resolved to the synced workspace copy by DAB.
-      tasks:
-        - task_key: setup_prerequisites
-          notebook_task:
-            notebook_path: ./00_setup_prerequisites.py
-        - task_key: data_generation
-          depends_on: [{ task_key: setup_prerequisites }]
-          notebook_task:
-            notebook_path: ./01_data_generation.py
-        - task_key: ai_gateway_setup
-          depends_on: [{ task_key: data_generation }]
-          notebook_task:
-            notebook_path: ./02_ai_gateway_setup.py
-        - task_key: uc_functions
-          depends_on: [{ task_key: ai_gateway_setup }]
-          notebook_task:
-            notebook_path: ./03_uc_functions.py
-        - task_key: vector_search
-          depends_on: [{ task_key: uc_functions }]
-          notebook_task:
-            notebook_path: ./04_vector_search.py
-        - task_key: ml_experiment
-          depends_on: [{ task_key: vector_search }]
-          notebook_task:
-            notebook_path: ./06_ml_experiment.py
-        - task_key: agentbricks_agent
-          depends_on: [{ task_key: ml_experiment }]
-          notebook_task:
-            notebook_path: ./07_agentbricks_agent.py
 
 targets:
   dev_simple:

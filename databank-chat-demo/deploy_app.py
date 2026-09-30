@@ -325,6 +325,19 @@ def sync_and_deploy(cfg: dict, profile: str | None) -> None:
     ws_path = cfg["workspace_path"]
     print(f"Syncing source -> {ws_path}")
     _db(["sync", HERE, ws_path, "--full"], profile)
+    # `databricks sync` honors .gitignore, and app.yaml is ignored (it's a
+    # generated artifact) — so it is NOT synced. Upload it explicitly so the
+    # freshly-generated, mode-correct app.yaml is what actually gets deployed.
+    _db(["workspace", "import", f"{ws_path}/app.yaml",
+         "--file", os.path.join(HERE, "app.yaml"),
+         "--format", "AUTO", "--overwrite"], profile)
+    # `apps deploy` requires the app in RUNNING state; start it if it's stopped
+    # (e.g. auto-stopped on inactivity, or left stopped by a prior failed deploy).
+    info = _db_json(["apps", "get", cfg["app_name"]], profile)
+    state = (info or {}).get("app_status", {}).get("state")
+    if state != "RUNNING":
+        print(f"App state is {state}; starting before deploy...")
+        _db(["apps", "start", cfg["app_name"]], profile)
     print(f"Deploying app '{cfg['app_name']}'...")
     _db(["apps", "deploy", cfg["app_name"], "--source-code-path", ws_path], profile)
     info = _db_json(["apps", "get", cfg["app_name"]], profile)

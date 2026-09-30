@@ -1,0 +1,15 @@
+# User-specific lab config — copy from Config_Parameters.py.sample and edit.
+# Kept out of git so each user's values stay local. DAB still uploads it to the
+# workspace via `sync.include` in databricks.yml.
+Config_Parameters.py
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Databricks Asset Bundle state
+.databricks/
+
+# OS
+.DS_Store

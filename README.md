@@ -19,6 +19,33 @@ Every module is a standalone Databricks notebook. Each notebook runs `%run ./Con
 
 ---
 
+## Getting Started
+
+1. **Clone the repo** (locally, or as a Databricks Git folder):
+   ```bash
+   git clone https://github.com/gurpreetseth-db/Databricks-GenAI-Basics.git
+   cd Databricks-GenAI-Basics
+   ```
+2. **Create your config from the template.** `Config_Parameters.py` is gitignored
+   so your values stay local — copy the sample and edit it:
+   ```bash
+   cp Config_Parameters.py.sample Config_Parameters.py
+   ```
+   Most values derive automatically from your username; review `CATALOG_STORAGE`,
+   the model names, `GENIE_SPACE_ID`, `LAKEBASE_PROJECT`, and `APP_NAME`. (Keep
+   these in sync with the `variables:` defaults in `databricks.yml`, or override
+   at deploy time with `--var`.)
+3. **Run the lab notebooks** `00 → 10` interactively to create the assets
+   (catalog/schema, UC functions, Vector Search index, Genie space, experiment).
+4. **Deploy the chat app** with the bundle — see
+   [Deploy with Databricks Asset Bundles (DAB)](#deploy-with-databricks-asset-bundles-dab).
+
+> The bundle still uploads your local `Config_Parameters.py` to the workspace
+> (via `sync.include` in `databricks.yml`) even though it's gitignored, so the
+> notebooks' `%run ./Config_Parameters` keeps working.
+
+---
+
 ## Prerequisites Checklist (Pre-Lab Setup)
 
 Complete these **before the lab starts**:
@@ -299,8 +326,9 @@ workspace, override at deploy time — e.g. `--var username=jdoe`.
 ```
 Databricks-GenAI-Basics/
 ├── README.md                          ← This guide
-├── databricks.yml                     ← Databricks Asset Bundle (deploys the whole repo + app + setup job)
-├── Config_Parameters.py               ← Central config (catalog/schema/model/endpoint names)
+├── databricks.yml                     ← Databricks Asset Bundle (deploys the whole repo + app)
+├── Config_Parameters.py.sample        ← Template — copy to Config_Parameters.py (gitignored) and edit
+├── .gitignore                         ← Ignores Config_Parameters.py, __pycache__, .databricks/, …
 ├── 00_setup_prerequisites.py          ← Packages, catalog, schema, volume, VS endpoint, MLflow, FM API test
 ├── 01_data_generation.py              ← Synthetic data (5 tables) + 7 PDFs
 ├── 02_ai_gateway_setup.py             ← AI Gateway route (rate limits, guardrails, routing, fallback, logging)

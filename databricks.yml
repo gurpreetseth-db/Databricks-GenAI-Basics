@@ -24,6 +24,12 @@
 bundle:
   name: databank-genai-basics
 
+# Config_Parameters.py is gitignored (each user copies it from the .sample), but
+# the lab notebooks `%run ./Config_Parameters`, so force it into the sync set.
+sync:
+  include:
+    - Config_Parameters.py
+
 variables:
   username:
     description: "Cleaned username (no dots/@), used to build catalog/schema/route names. Mirrors Config_Parameters.py username_clean."

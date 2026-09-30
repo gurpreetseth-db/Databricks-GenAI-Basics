@@ -101,3 +101,51 @@ print(f"🤖  Foundation Model : {FOUNDATION_MODEL} ✅")
 print(f"🤖  Embedded Model : {EMBEDDING_MODEL} ✅")
 print(f"🤖  Faillback Model : {FALLBACK_MODEL} ✅")
 print(f"🔍 Genie Agent: {GENIE_NAME} ✅")
+
+# COMMAND ----------
+
+# DBTITLE 1,App Deployment Parameters (databank-chat-demo)
+# ================================================================
+# Single source of truth for the chat-app deployment.
+# 12_deploy_chat_app.py reads these; the app never stores config independently
+# (app.yaml is generated from these values at deploy time).
+# ================================================================
+
+# Databricks App name (must be lowercase alphanumeric + hyphens, unique per workspace)
+APP_NAME = "databank-chat-demo"
+
+# UC-qualified AI Gateway model-service route (points at Claude Sonnet 4.5)
+MODEL_ROUTE = f"{CATALOG}.{SCHEMA}.{AI_GW_ROUTE}"
+
+# UC functions exposed to the agent (names only; CATALOG/SCHEMA come from above)
+UC_FUNCTIONS = [
+    "calculate_customer_risk",
+    "flag_suspicious_transactions",
+    "get_portfolio_summary",
+]
+
+# Lakebase (autoscaling) — used by the shortterm/longterm memory modes
+LAKEBASE_PROJECT  = "agentic-memory"
+LAKEBASE_BRANCH   = "production"
+LAKEBASE_ENDPOINT = "primary"
+LAKEBASE_DATABASE = "databricks_postgres"
+
+# Genie space id — auto-resolved from GENIE_NAME. Falls back to the explicit id
+# if the lookup API is unavailable, so this cell never breaks the config.
+GENIE_SPACE_ID = "01f1b6c9b5ad17bca4c13c1991f01333"
+try:
+    from databricks.sdk import WorkspaceClient
+    _w = WorkspaceClient()
+    for _sp in _w.genie.list_spaces():
+        _title = getattr(_sp, "title", None) or getattr(_sp, "name", None)
+        if _title == GENIE_NAME:
+            GENIE_SPACE_ID = _sp.space_id
+            break
+except Exception as _e:
+    print(f"⚠️  Genie space id lookup skipped, using default: {_e}")
+
+print(f"🚀 App        : {APP_NAME}")
+print(f"🤖 Model route: {MODEL_ROUTE}")
+print(f"🔧 UC funcs   : {', '.join(UC_FUNCTIONS)}")
+print(f"🧠 Lakebase   : {LAKEBASE_PROJECT}/{LAKEBASE_BRANCH}/{LAKEBASE_ENDPOINT}")
+print(f"🔍 Genie space: {GENIE_SPACE_ID}")

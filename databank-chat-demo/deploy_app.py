@@ -10,15 +10,15 @@ config depending on ``--mode``. All three modes share the same UC AI Gateway
 route (Claude Sonnet 4.5), UC functions, Genie Agent and Vector Search index.
 
 The calling notebook ``12_deploy_chat_app.py`` runs ``Config_Parameters.py``
-and passes those names in as flags, so this stays in sync with the lab config.
-Run standalone and it derives the same names from the logged-in user.
+and passes every name in as a flag, so ``Config_Parameters.py`` is the single
+source of truth. This script derives nothing from the username — run it
+standalone and you must pass the same values explicitly (see ``--help``).
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -60,12 +60,6 @@ def _db_json(args: list[str], profile: str | None, check: bool = True):
 # ---------------------------------------------------------------------------
 # Resolvers
 # ---------------------------------------------------------------------------
-def resolve_username(profile: str | None) -> str:
-    me = _db_json(["current-user", "me"], profile)
-    email = (me or {}).get("userName", "")
-    return re.sub(r"\W+", "", email.split("@")[0])
-
-
 def resolve_lakebase_host(endpoint_path: str, profile: str | None) -> str:
     ep = _db_json(["postgres", "get-endpoint", endpoint_path], profile)
     if not ep:
@@ -355,12 +349,13 @@ def main() -> None:
     p.add_argument("--mode", choices=MODES, default="simple")
     p.add_argument("--profile", default=os.getenv("DATABRICKS_CONFIG_PROFILE"))
     p.add_argument("--app-name", default="databank-chat-demo")
+    # Lab config has NO username-derived defaults here: it is owned by
+    # Config_Parameters.py and passed in by 12_deploy_chat_app.py (single source
+    # of truth). Missing values fail loudly in main() rather than being rebuilt.
     p.add_argument("--catalog")
     p.add_argument("--schema")
     p.add_argument("--model-route")
     p.add_argument("--vector-index")
-    # Lab-specific config has NO defaults here: it is owned by Config_Parameters.py
-    # and passed in by 12_deploy_chat_app.py (single source of truth).
     p.add_argument("--genie-space-id")
     p.add_argument("--genie-name")
     p.add_argument("--uc-functions")
@@ -374,12 +369,23 @@ def main() -> None:
     p.add_argument("--skip-deploy", action="store_true", help="Configure only; don't sync/deploy")
     args = p.parse_args()
 
-    # Lab config is owned by Config_Parameters.py (passed by the notebook). Fail
-    # clearly if a standalone run omits a required value rather than silently
-    # baking in a stale default.
+    # Config_Parameters.py is the SINGLE SOURCE OF TRUTH. Every name is passed in
+    # by 12_deploy_chat_app.py; this script derives nothing from the username, so
+    # the two can never drift. Fail clearly if a required value is missing rather
+    # than silently baking in a stale, username-derived default.
     missing = []
+    if not args.catalog:
+        missing.append("--catalog")
+    if not args.schema:
+        missing.append("--schema")
+    if not args.model_route:
+        missing.append("--model-route")
+    if not args.vector_index:
+        missing.append("--vector-index")
     if not args.genie_space_id:
         missing.append("--genie-space-id")
+    if not args.genie_name:
+        missing.append("--genie-name")
     if not args.uc_functions:
         missing.append("--uc-functions")
     if args.mode in ("shortterm", "longterm") and not args.lakebase_project:
@@ -392,21 +398,18 @@ def main() -> None:
             "standalone run."
         )
 
-    username = resolve_username(args.profile)
-    catalog = args.catalog or f"{username}_databank_lab"
-    schema = args.schema or f"{username}_financial_data"
     me = _db_json(["current-user", "me"], args.profile)["userName"]
 
     cfg = {
         "mode": args.mode,
         "app_name": args.app_name,
-        "catalog": catalog,
-        "schema": schema,
+        "catalog": args.catalog,
+        "schema": args.schema,
         "uc_functions": [f.strip() for f in args.uc_functions.split(",") if f.strip()],
-        "vector_index": args.vector_index or f"{catalog}.{schema}.product-docs-index",
+        "vector_index": args.vector_index,
         "genie_space_id": args.genie_space_id,
-        "genie_name": args.genie_name or f"{username}-DataBank-Financial-Advisor",
-        "model_route": args.model_route or f"{catalog}.{schema}.{username}-databank-llm-route",
+        "genie_name": args.genie_name,
+        "model_route": args.model_route,
         "experiment_id": args.experiment_id,
         "lakebase_project": args.lakebase_project,
         "lakebase_branch": args.lakebase_branch,
@@ -421,7 +424,7 @@ def main() -> None:
     }
 
     print(f"\n=== Deploying '{cfg['app_name']}' in {cfg['mode'].upper()} mode ===")
-    print(f"Catalog/Schema : {catalog}.{schema}")
+    print(f"Catalog/Schema : {cfg['catalog']}.{cfg['schema']}")
     print(f"Model route    : {cfg['model_route']}")
 
     # 1. App + resources (also provisions the SP)

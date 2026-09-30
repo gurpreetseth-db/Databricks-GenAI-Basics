@@ -206,6 +206,21 @@ except Exception as e:
 
 vsc = VectorSearchClient()
 
+# Auto-detect embedding model — fall back if configured one is missing
+_embed_model = EMBEDDING_MODEL
+_all_eps = list(w.serving_endpoints.list())
+if _embed_model not in {ep.name for ep in _all_eps}:
+    print(f"⚠️  Embedding model '{_embed_model}' not available — searching for alternatives...")
+    _avail = [
+        ep.name for ep in _all_eps
+        if getattr(ep, 'task', None) == 'llm/v1/embeddings'
+    ]
+    if _avail:
+        _embed_model = _avail[0]
+        print(f"✅ Using available embedding endpoint: {_embed_model}")
+    else:
+        raise RuntimeError("No embedding model endpoints available in this workspace")
+
 # Delete existing index if it exists (for re-runs)
 try:
     vsc.delete_index(endpoint_name=AI_VECTOR_SEARCH_ENDPOINT, index_name=VS_INDEX_NAME)
@@ -216,7 +231,7 @@ except Exception:
 print(f"🔧 Creating Vector Search Index: {VS_INDEX_NAME}")
 print(f"   Endpoint  : {AI_VECTOR_SEARCH_ENDPOINT}")
 print(f"   Source    : {SOURCE_TABLE}")
-print(f"   Embedding : {EMBEDDING_MODEL}")
+print(f"   Embedding : {_embed_model}")
 print("   This will take 2-4 minutes...")
 
 # Create Delta Sync index with managed embeddings
@@ -227,7 +242,7 @@ index = vsc.create_delta_sync_index_and_wait(
     pipeline_type="TRIGGERED",
     primary_key="chunk_id",
     embedding_source_column="chunk_text",
-    embedding_model_endpoint_name=EMBEDDING_MODEL
+    embedding_model_endpoint_name=_embed_model
 )
 
 print(f"\n✅ Vector Search Index ready: {VS_INDEX_NAME}")

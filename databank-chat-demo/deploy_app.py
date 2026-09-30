@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Deploy the DataBank chat demo in one of three memory modes.
+"""Post-deploy configurator for the DataBank chat app (DAB companion).
 
-    python deploy_app.py                      # simple   (default, no memory)
-    python deploy_app.py --mode shortterm     # session-scoped history (Lakebase)
-    python deploy_app.py --mode longterm      # per-user history + fact recall
+Run this AFTER ``databricks bundle deploy -t <target>`` has created the app and
+synced the code:
 
-One app (default name ``databank-chat-demo``) is redeployed with different
-config depending on ``--mode``. All three modes share the same UC AI Gateway
-route (Claude Sonnet 4.5), UC functions, Genie Agent and Vector Search index.
+    databricks bundle deploy      -t dev_longterm -p Myenv
+    python databank-chat-demo/deploy_app.py -t dev_longterm -p Myenv
 
-The calling notebook ``12_deploy_chat_app.py`` runs ``Config_Parameters.py``
-and passes every name in as a flag, so ``Config_Parameters.py`` is the single
-source of truth. This script derives nothing from the username — run it
-standalone and you must pass the same values explicitly (see ``--help``).
+The bundle (``databricks.yml``) is the single source of truth. This script reads
+the resolved config from ``databricks bundle summary -o json -t <target>`` and
+then applies the bits DAB cannot express on its own:
+
+  * the app env — including the resolved Lakebase host and the app SP as PGUSER
+    (written to the workspace copy of app.yaml, then redeployed)
+  * EXECUTE on the AI Gateway model-service route  (uc_securable has no such type)
+  * catalog USE + schema USE/SELECT/EXECUTE        (table-level SELECT for Genie)
+  * a *federated* Lakebase login role for the app SP (shortterm/longterm only)
+
+DAB owns app creation and code sync; this script owns configuration and grants.
 """
 from __future__ import annotations
 
@@ -26,25 +31,27 @@ import tempfile
 
 MODES = ("simple", "shortterm", "longterm")
 HERE = os.path.dirname(os.path.abspath(__file__))
+BUNDLE_ROOT = os.path.dirname(HERE)  # databricks.yml lives at the repo root
 
 
 # ---------------------------------------------------------------------------
 # CLI helpers
 # ---------------------------------------------------------------------------
-def _run(cmd: list[str], check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], check: bool = True, cwd: str | None = None) -> subprocess.CompletedProcess:
     print(f"  $ {' '.join(cmd)}")
-    cp = subprocess.run(cmd, capture_output=capture, text=True)
+    cp = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if check and cp.returncode != 0:
         sys.stderr.write((cp.stdout or "") + (cp.stderr or "") + "\n")
         raise SystemExit(f"Command failed ({cp.returncode}): {' '.join(cmd)}")
     return cp
 
 
-def _db(args: list[str], profile: str | None, check: bool = True) -> subprocess.CompletedProcess:
+def _db(args: list[str], profile: str | None, check: bool = True,
+        cwd: str | None = None) -> subprocess.CompletedProcess:
     cmd = ["databricks", *args]
     if profile:
         cmd += ["-p", profile]
-    return _run(cmd, check=check)
+    return _run(cmd, check=check, cwd=cwd)
 
 
 def _db_json(args: list[str], profile: str | None, check: bool = True):
@@ -58,6 +65,60 @@ def _db_json(args: list[str], profile: str | None, check: bool = True):
 
 
 # ---------------------------------------------------------------------------
+# Read the resolved config from the bundle (single source of truth)
+# ---------------------------------------------------------------------------
+def load_bundle_config(target: str, profile: str | None) -> dict:
+    """Resolve names/paths from `databricks bundle summary` for the target."""
+    cp = _db(["bundle", "summary", "-t", target, "-o", "json"], profile, cwd=BUNDLE_ROOT)
+    summary = json.loads(cp.stdout)
+
+    def var(name: str, default: str = "") -> str:
+        return (summary.get("variables", {}).get(name, {}) or {}).get("value", default) or default
+
+    app = summary.get("resources", {}).get("apps", {}).get("databank_chat_demo", {})
+    app_name = app.get("name")
+    source_code_path = app.get("source_code_path")
+    if not app_name or not source_code_path:
+        raise SystemExit(
+            "Could not read the app from the bundle summary — run "
+            f"`databricks bundle deploy -t {target}` first."
+        )
+
+    username = var("username")
+    catalog = var("catalog")
+    schema = var("schema")
+    mode = var("mode", "simple")
+    lakebase_project = var("lakebase_project")
+    lakebase_branch = var("lakebase_branch", "production")
+    lakebase_endpoint = var("lakebase_endpoint", "primary")
+
+    cfg = {
+        "target": target,
+        "app_name": app_name,
+        "source_code_path": source_code_path,
+        "mode": mode,
+        "catalog": catalog,
+        "schema": schema,
+        "uc_functions": [f.strip() for f in var("uc_functions").split(",") if f.strip()],
+        "vector_index": f"{catalog}.{schema}.product-docs-index",
+        "genie_space_id": var("genie_space_id"),
+        "genie_name": f"{username}-DataBank-Financial-Advisor",
+        "model_route": f"{catalog}.{schema}.{username}-databank-llm-route",
+        "experiment_id": var("experiment_id"),
+        "lakebase_project": lakebase_project,
+        "lakebase_branch": lakebase_branch,
+        "lakebase_endpoint": lakebase_endpoint,
+        "lakebase_database": var("lakebase_database", "databricks_postgres"),
+        "lakebase_schema": var("lakebase_schema", "conversation_memory"),
+        "lakebase_endpoint_path": (
+            f"projects/{lakebase_project}/branches/{lakebase_branch}"
+            f"/endpoints/{lakebase_endpoint}"
+        ),
+    }
+    return cfg
+
+
+# ---------------------------------------------------------------------------
 # Resolvers
 # ---------------------------------------------------------------------------
 def resolve_lakebase_host(endpoint_path: str, profile: str | None) -> str:
@@ -67,68 +128,22 @@ def resolve_lakebase_host(endpoint_path: str, profile: str | None) -> str:
     return ep["status"]["hosts"]["host"]
 
 
-# ---------------------------------------------------------------------------
-# App resources (UC functions, vector index, Genie space, experiment)
-# ---------------------------------------------------------------------------
-def build_resources(cfg: dict) -> list[dict]:
-    cat, sch = cfg["catalog"], cfg["schema"]
-    resources: list[dict] = []
-    if cfg.get("experiment_id"):
-        resources.append(
-            {
-                "name": "experiment",
-                "experiment": {"experiment_id": cfg["experiment_id"], "permission": "CAN_EDIT"},
-            }
+def get_app_sp(app_name: str, profile: str | None) -> str:
+    """Read the app's service-principal client id (DAB created the app)."""
+    info = _db_json(["apps", "get", app_name], profile)
+    if not info or not info.get("service_principal_client_id"):
+        raise SystemExit(
+            f"App '{app_name}' has no service principal yet — run "
+            "`databricks bundle deploy` first so DAB creates it."
         )
-    # App resource `name` must be 2-30 chars (it is only a label / valueFrom key;
-    # the actual securable is identified by securable_full_name below).
-    for fn in cfg["uc_functions"]:
-        full = f"{cat}.{sch}.{fn}"
-        resources.append(
-            {
-                "name": f"fn_{fn}"[:30],
-                "uc_securable": {
-                    "securable_full_name": full,
-                    "securable_type": "FUNCTION",
-                    "permission": "EXECUTE",
-                },
-            }
-        )
-    resources.append(
-        {
-            "name": "vector_search",
-            "uc_securable": {
-                "securable_full_name": cfg["vector_index"],
-                "securable_type": "TABLE",
-                "securable_kind": "TABLE_ONLINE_VECTOR_INDEX_REPLICA",
-                "permission": "SELECT",
-            },
-        }
-    )
-    resources.append(
-        {
-            "name": "genie_space",
-            "genie_space": {
-                "name": "genie_space",
-                "space_id": cfg["genie_space_id"],
-                "permission": "CAN_RUN",
-            },
-        }
-    )
-    return resources
+    sp = info["service_principal_client_id"]
+    print(f"App service principal: {sp}")
+    return sp
 
 
-def grant_model_service(cfg: dict, sp_client_id: str, profile: str | None) -> None:
-    """Grant the app SP EXECUTE on the AI Gateway model-service route.
-
-    Without this, resolving the route raises 404 NOT_FOUND (UC hides securables
-    the caller can't access). Not expressible as an app `uc_securable` resource,
-    so we grant it directly. Idempotent.
-    """
-    print(f"Granting EXECUTE on model-service {cfg['model_route']} to {sp_client_id}...")
-    _patch_perms("model_service", cfg["model_route"], sp_client_id, ["EXECUTE"], profile)
-
-
+# ---------------------------------------------------------------------------
+# Grants DAB cannot express
+# ---------------------------------------------------------------------------
 def _patch_perms(securable_type: str, full_name: str, sp: str, privileges: list[str],
                  profile: str | None) -> None:
     changes = {"changes": [{"principal": sp, "add": privileges}]}
@@ -143,57 +158,37 @@ def _patch_perms(securable_type: str, full_name: str, sp: str, privileges: list[
         os.unlink(p)
 
 
-def grant_data_access(cfg: dict, sp_client_id: str, profile: str | None) -> None:
-    """Grant the SP catalog/schema/table data access.
+def grant_model_service(cfg: dict, sp: str, profile: str | None) -> None:
+    """Grant the app SP EXECUTE on the AI Gateway model-service route.
+
+    Without this, resolving the route raises 404 NOT_FOUND (UC hides securables
+    the caller can't access). The app `uc_securable` resource type has no
+    model_service, so we grant it directly. Idempotent.
+    """
+    print(f"Granting EXECUTE on model-service {cfg['model_route']} to {sp}...")
+    _patch_perms("model_service", cfg["model_route"], sp, ["EXECUTE"], profile)
+
+
+def grant_data_access(cfg: dict, sp: str, profile: str | None) -> None:
+    """Grant the SP catalog/schema/table data access for Genie SQL.
 
     The Genie Agent runs SQL against the underlying tables as the app SP, so it
-    needs USE_CATALOG + USE_SCHEMA + SELECT (cascades to all tables) + EXECUTE
-    (functions). App resources only grant the specific attached securables, not
-    table SELECT. Idempotent.
+    needs USE_CATALOG + USE_SCHEMA + SELECT (cascades to all tables) + EXECUTE.
+    App resources only bind the specific attached securables, not table SELECT.
+    Idempotent.
     """
-    print(f"Granting data access (USE/SELECT/EXECUTE) to {sp_client_id}...")
-    _patch_perms("catalog", cfg["catalog"], sp_client_id, ["USE_CATALOG"], profile)
+    print(f"Granting data access (USE/SELECT/EXECUTE) to {sp}...")
+    _patch_perms("catalog", cfg["catalog"], sp, ["USE_CATALOG"], profile)
     _patch_perms(
-        "schema", f"{cfg['catalog']}.{cfg['schema']}", sp_client_id,
+        "schema", f"{cfg['catalog']}.{cfg['schema']}", sp,
         ["USE_SCHEMA", "SELECT", "EXECUTE"], profile,
     )
 
 
-def ensure_app(cfg: dict, profile: str | None) -> str:
-    """Create or update the app with tool resources. Returns SP client id."""
-    name = cfg["app_name"]
-    existing = _db_json(["apps", "get", name], profile, check=False)
-    body = {
-        "name": name,
-        "description": f"DataBank chat demo ({cfg['mode']} memory mode)",
-        "resources": build_resources(cfg),
-    }
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-        json.dump(body, f)
-        body_path = f.name
-    try:
-        # CLI quirk: `apps create` forbids the positional NAME alongside --json
-        # (name must be in the body), but `apps update` REQUIRES the positional.
-        if existing:
-            print(f"App '{name}' exists — updating resources...")
-            _db(["apps", "update", name, "--json", f"@{body_path}"], profile)
-        else:
-            print(f"Creating app '{name}'...")
-            _db(["apps", "create", "--json", f"@{body_path}"], profile)
-    finally:
-        os.unlink(body_path)
-    info = _db_json(["apps", "get", name], profile)
-    sp = info.get("service_principal_client_id")
-    print(f"App service principal: {sp}")
-    return sp
-
-
-# ---------------------------------------------------------------------------
-# Lakebase grant (short/long): ensure the app SP can connect + create objects
-# ---------------------------------------------------------------------------
-def grant_lakebase(cfg: dict, sp_client_id: str, profile: str | None) -> None:
+def grant_lakebase(cfg: dict, sp: str, profile: str | None) -> None:
+    """Provision a federated OAuth login role for the app SP (short/long only)."""
     endpoint = cfg["lakebase_endpoint_path"]
-    host = resolve_lakebase_host(endpoint, profile)
+    host = cfg["lakebase_host"]
     cred = _db_json(["postgres", "generate-database-credential", endpoint], profile)
     token = cred["token"]
     me = _db_json(["current-user", "me"], profile)["userName"]
@@ -206,29 +201,25 @@ def grant_lakebase(cfg: dict, sp_client_id: str, profile: str | None) -> None:
         ip = out.splitlines()[-1] if out else ""
     conninfo = f"host={host} {'hostaddr=' + ip + ' ' if ip else ''}port=5432 dbname={cfg['lakebase_database']} user={me} sslmode=require"
 
-    # Provision a *federated* OAuth login role for the service principal via the
-    # databricks_auth extension. A plain `CREATE ROLE` does NOT link the role to
-    # the Databricks identity, so OAuth password auth would fail. Idempotent:
-    # skip creation if the role already exists.
+    # A plain `CREATE ROLE` does NOT link the role to the Databricks identity, so
+    # OAuth password auth would fail. Use databricks_create_role(...) to federate.
+    # Idempotent: skip creation if the role already exists.
     do_block = f"""
 CREATE EXTENSION IF NOT EXISTS databricks_auth;
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{sp_client_id}') THEN
-    PERFORM databricks_create_role('{sp_client_id}', 'SERVICE_PRINCIPAL');
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{sp}') THEN
+    PERFORM databricks_create_role('{sp}', 'SERVICE_PRINCIPAL');
   END IF;
 END $$;
-GRANT CONNECT ON DATABASE {cfg['lakebase_database']} TO "{sp_client_id}";
-GRANT CREATE  ON DATABASE {cfg['lakebase_database']} TO "{sp_client_id}";
+GRANT CONNECT ON DATABASE {cfg['lakebase_database']} TO "{sp}";
+GRANT CREATE  ON DATABASE {cfg['lakebase_database']} TO "{sp}";
 """
     psql = shutil.which("psql")
     if not psql:
-        print(
-            "!! psql not found. Grant the app SP manually (or run "
-            "scripts/grant_lakebase_permissions.py):\n" + do_block
-        )
+        print("!! psql not found. Grant the app SP manually:\n" + do_block)
         return
     env = dict(os.environ, PGPASSWORD=token, PGCONNECT_TIMEOUT="20")
-    print(f"Granting Lakebase CONNECT+CREATE to {sp_client_id} on {host}...")
+    print(f"Granting Lakebase CONNECT+CREATE to {sp} on {host}...")
     cp = subprocess.run([psql, conninfo, "-v", "ON_ERROR_STOP=1", "-c", do_block],
                         capture_output=True, text=True, env=env)
     sys.stdout.write(cp.stdout)
@@ -239,7 +230,8 @@ GRANT CREATE  ON DATABASE {cfg['lakebase_database']} TO "{sp_client_id}";
 
 
 # ---------------------------------------------------------------------------
-# app.yaml generation (env differs per mode)
+# app.yaml (env differs per mode) — written to a temp file, uploaded to the
+# workspace copy DAB synced. The committed base app.yaml is left untouched.
 # ---------------------------------------------------------------------------
 def build_env(cfg: dict) -> list[dict]:
     env: list[dict] = [
@@ -248,8 +240,7 @@ def build_env(cfg: dict) -> list[dict]:
         {"name": "API_PROXY", "value": "http://localhost:8000/invocations"},
         {"name": "CHAT_APP_PORT", "value": "3000"},
         {"name": "CHAT_PROXY_TIMEOUT_SECONDS", "value": "300"},
-        {"name": "MLFLOW_EXPERIMENT_ID", "valueFrom": "experiment"},
-        # ---- app config (mirrors Config_Parameters.py) ----
+        # ---- app config (resolved from databricks.yml) ----
         {"name": "APP_NAME", "value": cfg["app_name"]},
         {"name": "MEMORY_MODE", "value": cfg["mode"]},
         {"name": "UC_CATALOG", "value": cfg["catalog"]},
@@ -260,6 +251,8 @@ def build_env(cfg: dict) -> list[dict]:
         {"name": "GENIE_NAME", "value": cfg["genie_name"]},
         {"name": "MODEL_ROUTE", "value": cfg["model_route"]},
     ]
+    if cfg.get("experiment_id"):
+        env.append({"name": "MLFLOW_EXPERIMENT_ID", "value": cfg["experiment_id"]})
     if cfg["mode"] in ("shortterm", "longterm"):
         env += [
             {"name": "LAKEBASE_PROJECT_ID", "value": cfg["lakebase_project"]},
@@ -268,8 +261,8 @@ def build_env(cfg: dict) -> list[dict]:
             {"name": "LAKEBASE_DATABASE", "value": cfg["lakebase_database"]},
             {"name": "LAKEBASE_SCHEMA", "value": cfg["lakebase_schema"]},
             {"name": "LAKEBASE_AUTOSCALING_ENDPOINT", "value": cfg["lakebase_endpoint_path"]},
-            # Frontend (e2e-chatbot) Postgres coordinates — it mints its own
-            # OAuth token, so no PGPASSWORD is needed. PGUSER = app SP client id.
+            # Frontend (e2e-chatbot) Postgres coordinates — it mints its own OAuth
+            # token, so no PGPASSWORD is needed. PGUSER = app SP client id.
             {"name": "PGHOST", "value": cfg["lakebase_host"]},
             {"name": "PGDATABASE", "value": cfg["lakebase_database"]},
             {"name": "PGUSER", "value": cfg["sp_client_id"]},
@@ -279,66 +272,56 @@ def build_env(cfg: dict) -> list[dict]:
     return env
 
 
-def write_app_yaml(cfg: dict) -> None:
-    import yaml  # pyyaml is commonly available; fall back to manual dump
-
-    doc = {"command": ["uv", "run", "start-app"], "env": build_env(cfg)}
-    path = os.path.join(HERE, "app.yaml")
+def _yaml_dump(doc: dict) -> str:
     try:
-        text = yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
+        import yaml
+        return yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
     except Exception:
-        text = _manual_yaml(doc)
+        lines = ["command:"]
+        for c in doc["command"]:
+            lines.append(f"  - {c}")
+        lines.append("env:")
+        for e in doc["env"]:
+            lines.append(f"  - name: {e['name']}")
+            key = "value" if "value" in e else "valueFrom"
+            lines.append(f"    {key}: \"{e[key]}\"")
+        return "\n".join(lines) + "\n"
+
+
+def write_app_yaml_temp(cfg: dict) -> str:
+    doc = {"command": ["uv", "run", "start-app"], "env": build_env(cfg)}
     header = (
-        "# GENERATED by deploy_app.py — DO NOT EDIT.\n"
-        "# All values derive from Config_Parameters.py; regenerated on every deploy.\n"
-        f"# mode={cfg['mode']}\n"
+        "# GENERATED by deploy_app.py from databricks.yml — DO NOT EDIT.\n"
+        f"# target={cfg['target']} mode={cfg['mode']}\n"
     )
-    with open(path, "w") as f:
-        f.write(header + text)
-    print(f"Wrote {path} (mode={cfg['mode']}, {len(doc['env'])} env vars)")
-
-
-def _manual_yaml(doc: dict) -> str:
-    lines = ["command:"]
-    for c in doc["command"]:
-        lines.append(f"  - {c}")
-    lines.append("env:")
-    for e in doc["env"]:
-        lines.append(f"  - name: {e['name']}")
-        if "value" in e:
-            lines.append(f"    value: \"{e['value']}\"")
-        else:
-            lines.append(f"    valueFrom: \"{e['valueFrom']}\"")
-    return "\n".join(lines) + "\n"
+    fd, path = tempfile.mkstemp(suffix="_app.yaml")
+    with os.fdopen(fd, "w") as f:
+        f.write(header + _yaml_dump(doc))
+    print(f"Rendered app.yaml ({cfg['mode']}, {len(doc['env'])} env vars) -> {path}")
+    return path
 
 
 # ---------------------------------------------------------------------------
-# Sync + deploy
+# Upload the full app.yaml to the workspace copy + redeploy
 # ---------------------------------------------------------------------------
-def sync_and_deploy(cfg: dict, profile: str | None) -> None:
-    ws_path = cfg["workspace_path"]
-    print(f"Syncing source -> {ws_path}")
-    _db(["sync", HERE, ws_path, "--full"], profile)
-    # `databricks sync` honors .gitignore, and app.yaml is ignored (it's a
-    # generated artifact) — so it is NOT synced. Upload it explicitly so the
-    # freshly-generated, mode-correct app.yaml is what actually gets deployed.
-    _db(["workspace", "import", f"{ws_path}/app.yaml",
-         "--file", os.path.join(HERE, "app.yaml"),
+def upload_and_deploy(cfg: dict, app_yaml_local: str, profile: str | None) -> None:
+    ws = cfg["source_code_path"]
+    print(f"Uploading app.yaml -> {ws}/app.yaml")
+    _db(["workspace", "import", f"{ws}/app.yaml", "--file", app_yaml_local,
          "--format", "AUTO", "--overwrite"], profile)
-    # `apps deploy` requires the app in RUNNING state; start it if it's stopped
-    # (e.g. auto-stopped on inactivity, or left stopped by a prior failed deploy).
+    # `apps deploy` needs the app RUNNING; start it if it was stopped.
     info = _db_json(["apps", "get", cfg["app_name"]], profile)
     state = (info or {}).get("app_status", {}).get("state")
     if state != "RUNNING":
         print(f"App state is {state}; starting before deploy...")
         _db(["apps", "start", cfg["app_name"]], profile)
     print(f"Deploying app '{cfg['app_name']}'...")
-    _db(["apps", "deploy", cfg["app_name"], "--source-code-path", ws_path], profile)
+    _db(["apps", "deploy", cfg["app_name"], "--source-code-path", ws], profile)
     info = _db_json(["apps", "get", cfg["app_name"]], profile)
-    print("\n=== DEPLOYED ===")
-    print(f"Mode : {cfg['mode']}")
-    print(f"URL  : {info.get('url')}")
-    print(f"State: {info.get('app_status', {}).get('state')}")
+    print("\n=== CONFIGURED ===")
+    print(f"Target: {cfg['target']}  Mode: {cfg['mode']}")
+    print(f"URL   : {info.get('url')}")
+    print(f"State : {info.get('app_status', {}).get('state')}")
 
 
 # ---------------------------------------------------------------------------
@@ -346,109 +329,42 @@ def sync_and_deploy(cfg: dict, profile: str | None) -> None:
 # ---------------------------------------------------------------------------
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", choices=MODES, default="simple")
-    p.add_argument("--profile", default=os.getenv("DATABRICKS_CONFIG_PROFILE"))
-    p.add_argument("--app-name", default="databank-chat-demo")
-    # Lab config has NO username-derived defaults here: it is owned by
-    # Config_Parameters.py and passed in by 12_deploy_chat_app.py (single source
-    # of truth). Missing values fail loudly in main() rather than being rebuilt.
-    p.add_argument("--catalog")
-    p.add_argument("--schema")
-    p.add_argument("--model-route")
-    p.add_argument("--vector-index")
-    p.add_argument("--genie-space-id")
-    p.add_argument("--genie-name")
-    p.add_argument("--uc-functions")
-    p.add_argument("--experiment-id")
-    p.add_argument("--lakebase-project")
-    p.add_argument("--lakebase-branch", default="production")
-    p.add_argument("--lakebase-endpoint", default="primary")
-    p.add_argument("--lakebase-database", default="databricks_postgres")
-    p.add_argument("--lakebase-schema", default="conversation_memory")
-    p.add_argument("--workspace-path")
-    p.add_argument("--skip-deploy", action="store_true", help="Configure only; don't sync/deploy")
+    p.add_argument("-t", "--target", required=True,
+                   help="Bundle target (dev_simple | dev_shortterm | dev_longterm)")
+    p.add_argument("-p", "--profile", default=os.getenv("DATABRICKS_CONFIG_PROFILE"))
+    p.add_argument("--skip-deploy", action="store_true",
+                   help="Apply grants + render app.yaml but don't upload/redeploy")
     args = p.parse_args()
 
-    # Config_Parameters.py is the SINGLE SOURCE OF TRUTH. Every name is passed in
-    # by 12_deploy_chat_app.py; this script derives nothing from the username, so
-    # the two can never drift. Fail clearly if a required value is missing rather
-    # than silently baking in a stale, username-derived default.
-    missing = []
-    if not args.catalog:
-        missing.append("--catalog")
-    if not args.schema:
-        missing.append("--schema")
-    if not args.model_route:
-        missing.append("--model-route")
-    if not args.vector_index:
-        missing.append("--vector-index")
-    if not args.genie_space_id:
-        missing.append("--genie-space-id")
-    if not args.genie_name:
-        missing.append("--genie-name")
-    if not args.uc_functions:
-        missing.append("--uc-functions")
-    if args.mode in ("shortterm", "longterm") and not args.lakebase_project:
-        missing.append("--lakebase-project")
-    if missing:
-        raise SystemExit(
-            "Missing required config: " + ", ".join(missing) + "\n"
-            "These values live in Config_Parameters.py — deploy via the "
-            "12_deploy_chat_app.py notebook, or pass them explicitly for a "
-            "standalone run."
-        )
+    cfg = load_bundle_config(args.target, args.profile)
+    if cfg["mode"] not in MODES:
+        raise SystemExit(f"Unexpected mode '{cfg['mode']}' (expected one of {MODES}).")
 
-    me = _db_json(["current-user", "me"], args.profile)["userName"]
-
-    cfg = {
-        "mode": args.mode,
-        "app_name": args.app_name,
-        "catalog": args.catalog,
-        "schema": args.schema,
-        "uc_functions": [f.strip() for f in args.uc_functions.split(",") if f.strip()],
-        "vector_index": args.vector_index,
-        "genie_space_id": args.genie_space_id,
-        "genie_name": args.genie_name,
-        "model_route": args.model_route,
-        "experiment_id": args.experiment_id,
-        "lakebase_project": args.lakebase_project,
-        "lakebase_branch": args.lakebase_branch,
-        "lakebase_endpoint": args.lakebase_endpoint,
-        "lakebase_database": args.lakebase_database,
-        "lakebase_schema": args.lakebase_schema,
-        "lakebase_endpoint_path": (
-            f"projects/{args.lakebase_project}/branches/{args.lakebase_branch}"
-            f"/endpoints/{args.lakebase_endpoint}"
-        ),
-        "workspace_path": args.workspace_path or f"/Workspace/Users/{me}/databank_chat_demo_src",
-    }
-
-    print(f"\n=== Deploying '{cfg['app_name']}' in {cfg['mode'].upper()} mode ===")
+    print(f"\n=== Configuring '{cfg['app_name']}' [{cfg['target']} / {cfg['mode'].upper()}] ===")
     print(f"Catalog/Schema : {cfg['catalog']}.{cfg['schema']}")
     print(f"Model route    : {cfg['model_route']}")
 
-    # 1. App + resources (also provisions the SP)
-    cfg["sp_client_id"] = ensure_app(cfg, args.profile)
+    # 1. App SP (DAB created the app)
+    cfg["sp_client_id"] = get_app_sp(cfg["app_name"], args.profile)
 
-    # 1b. Grant the SP EXECUTE on the AI Gateway model-service (all modes)
+    # 2. Grants DAB cannot express (all modes)
     grant_model_service(cfg, cfg["sp_client_id"], args.profile)
-
-    # 1c. Grant the SP data access (catalog/schema/tables) for Genie SQL (all modes)
     grant_data_access(cfg, cfg["sp_client_id"], args.profile)
 
-    # 2. Lakebase (short/long only): host + SP grant
+    # 3. Lakebase (shortterm/longterm only): host + federated SP role
     if cfg["mode"] in ("shortterm", "longterm"):
         cfg["lakebase_host"] = resolve_lakebase_host(cfg["lakebase_endpoint_path"], args.profile)
         grant_lakebase(cfg, cfg["sp_client_id"], args.profile)
 
-    # 3. app.yaml for this mode
-    write_app_yaml(cfg)
-
-    # 4. Sync + deploy
-    if args.skip_deploy:
-        print("--skip-deploy set: app.yaml written, not deploying.")
-        return
-    sync_and_deploy(cfg, args.profile)
+    # 4. Full app.yaml for this mode -> workspace copy, then redeploy
+    app_yaml_local = write_app_yaml_temp(cfg)
+    try:
+        if args.skip_deploy:
+            print("--skip-deploy set: grants applied, app.yaml rendered, not redeploying.")
+            return
+        upload_and_deploy(cfg, app_yaml_local, args.profile)
+    finally:
+        os.unlink(app_yaml_local)
 
 
 if __name__ == "__main__":

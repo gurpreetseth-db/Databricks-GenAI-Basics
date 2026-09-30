@@ -235,11 +235,69 @@ It contrasts this new API against the older serving-endpoint `ai_gateway` block.
 
 ---
 
+## Deploy with Databricks Asset Bundles (DAB)
+
+The whole repo is a **Databricks Asset Bundle** (`databricks.yml`). One command
+uploads the entire codebase (notebooks, `Config_Parameters.py`, `lib/`, `img/`,
+and the `databank-chat-demo` app) to the workspace and provisions:
+
+- the **`databank-chat-demo`** Databricks App (+ its UC-function / Vector-Search /
+  Genie resource bindings), and
+- a **`databank_lab_setup`** Job that runs the setup notebooks (00→07) in order.
+
+### The three memory modes are bundle *targets*
+
+| Target | App memory |
+|--------|-----------|
+| `dev_simple`    | none (ephemeral) |
+| `dev_shortterm` | this browser session only (Lakebase) |
+| `dev_longterm`  | per-user history + durable fact recall (Lakebase) |
+
+### Deploy (from the repo root)
+
+```bash
+# 1) Deploy code + app + setup job for the mode you want:
+databricks bundle deploy -t dev_longterm -p Myenv
+
+# 2) (optional) Provision the lab assets by running the setup notebooks:
+databricks bundle run databank_lab_setup -t dev_longterm -p Myenv
+
+# 3) Apply the app env + grants DAB can't express, then redeploy the app:
+python databank-chat-demo/deploy_app.py -t dev_longterm -p Myenv
+```
+
+Or run the **`12_deploy_chat_app.py`** notebook in the workspace: pick the `mode`
+widget and Run All — it performs steps 1 and 3 for you.
+
+### Why the two-step deploy?
+
+`databricks bundle deploy` creates the app + service principal and syncs the
+code. `deploy_app.py` then applies what the bundle schema can't express:
+
+- the app **env** (incl. the live-resolved Lakebase host and the app SP as `PGUSER`),
+- **EXECUTE** on the AI Gateway **model-service** route (the `uc_securable` app
+  resource type only supports `VOLUME/TABLE/FUNCTION/CONNECTION`),
+- catalog **USE** + schema **USE/SELECT/EXECUTE** (table-level SELECT for Genie SQL),
+- a **federated Lakebase login role** for the app SP (`shortterm`/`longterm` only).
+
+### Config = single source of truth
+
+Names/derivations live in `databricks.yml` `variables:` (mirroring
+`Config_Parameters.py`). `deploy_app.py` reads the *resolved* values from
+`databricks bundle summary`, so the two never drift. For another user or
+workspace, override at deploy time — e.g. `--var username=jdoe`.
+
+> **Note:** `05_genie_space` and `08_Playground_Deploy_App` involve manual UI
+> steps and are **not** in the setup Job — run those interactively.
+
+---
+
 ## Files in This Repo
 
 ```
 Databricks-GenAI-Basics/
 ├── README.md                          ← This guide
+├── databricks.yml                     ← Databricks Asset Bundle (deploys the whole repo + app + setup job)
 ├── Config_Parameters.py               ← Central config (catalog/schema/model/endpoint names)
 ├── 00_setup_prerequisites.py          ← Packages, catalog, schema, volume, VS endpoint, MLflow, FM API test
 ├── 01_data_generation.py              ← Synthetic data (5 tables) + 7 PDFs
@@ -252,15 +310,20 @@ Databricks-GenAI-Basics/
 ├── 08_Playground_Deploy_App.ipynb     ← AI Playground testing → Export to Databricks Apps
 ├── 09_evaluation_llm_judge.py         ← LLM-as-a-judge evaluation
 ├── 10_evaluation_labels.py            ← Label schemas, human labeling, review workflow
+├── 12_deploy_chat_app.py              ← Notebook that drives the bundle deploy (pick a memory mode)
 ├── UC_AI_Gateway_Complete_Demo.py     ← Bonus: Unity AI Gateway Model Services demo
-├── Dont Use - 08_databricks_app.py    ← Deprecated hand-coded Gradio app (reference only)
 ├── img/                               ← Screenshots referenced by the notebooks
-└── lib/                               ← Helper package
-    ├── __init__.py
-    ├── workspace_links.py             ← Builds workspace UI URLs for setup validation
-    └── provisioning.py.ipynb          ← Provisioning helpers
+├── lib/                               ← Helper package
+│   ├── __init__.py
+│   ├── workspace_links.py             ← Builds workspace UI URLs for setup validation
+│   └── provisioning.py.ipynb          ← Provisioning helpers
+└── databank-chat-demo/                ← 3-mode chat app (deployed by the bundle)
+    ├── app.yaml                       ← Base app spec (deploy_app.py writes the full per-mode env)
+    ├── deploy_app.py                  ← Post-deploy configurator (env + grants DAB can't express)
+    ├── agent_server/                  ← OpenAI Agents SDK backend (UC funcs, Genie, Vector Search)
+    └── e2e-chatbot-app-next/          ← Vercel AI SDK frontend + Lakebase chat history
 ```
 
 ---
 
-*DataBank AI Lab | Updated September 2026 — README synced with notebooks: per-user config, Playground→Apps flow (Module 08), Gemma/GTE/Kimi models, and the bonus Unity AI Gateway Model Services demo.*
+*DataBank AI Lab | Updated October 2026 — now a Databricks Asset Bundle: `databricks bundle deploy` ships the whole codebase + the 3-mode `databank-chat-demo` app + a lab-setup job, with memory mode selected per bundle target.*

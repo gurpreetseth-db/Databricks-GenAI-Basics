@@ -95,7 +95,7 @@ AGENT_ENDPOINT = f"{username_clean}-databank-ai-advisor"
 # Foundation Model used throughout the lab (no API key needed — hosted by Databricks)
 FOUNDATION_MODEL = "system.ai.databricks-claude-sonnet-4-5"
 EMBEDDING_MODEL  = "gte_large_en_v1_5"
-FALLBACK_MODEL   = "system.ai.femma-3-12b-it"
+FALLBACK_MODEL   = "system.ai.gemma-3-12b-it"
 
 # Genie Name
 GENIE_NAME   = f"{username_clean}-DataBank-Financial-Advisor"

@@ -27,11 +27,13 @@ Every module is a standalone Databricks notebook. Each notebook runs `%run ./Con
    cd Databricks-GenAI-Basics
    ```
 2. **Create your config from the template.** `Config_Parameters.py` is gitignored
-   so your values stay local — copy the sample and edit it:
+   so your values stay local — copy the template notebook and edit it:
    ```bash
-   cp Config_Parameters.py.sample Config_Parameters.py
+   cp Config_Parameters-Sample.py Config_Parameters.py
    ```
-   Most values derive automatically from your username; review `CATALOG_STORAGE`,
+   In the Databricks workspace, open **`Config_Parameters-Sample`** and
+   **File → Clone** it to `Config_Parameters`. Most values derive automatically
+   from your username; review `CATALOG_STORAGE`,
    the model names, `GENIE_SPACE_ID`, `LAKEBASE_PROJECT`, and `APP_NAME`. (Keep
    these in sync with the `variables:` defaults in `databricks.yml`, or override
    at deploy time with `--var`.)
@@ -327,7 +329,7 @@ workspace, override at deploy time — e.g. `--var username=jdoe`.
 Databricks-GenAI-Basics/
 ├── README.md                          ← This guide
 ├── databricks.yml                     ← Databricks Asset Bundle (deploys the whole repo + app)
-├── Config_Parameters.py.sample        ← Template — copy to Config_Parameters.py (gitignored) and edit
+├── Config_Parameters-Sample.py        ← Template notebook — copy to Config_Parameters.py (gitignored) and edit
 ├── .gitignore                         ← Ignores Config_Parameters.py, __pycache__, .databricks/, …
 ├── 00_setup_prerequisites.py          ← Packages, catalog, schema, volume, VS endpoint, MLflow, FM API test
 ├── 01_data_generation.py              ← Synthetic data (5 tables) + 7 PDFs

@@ -38,6 +38,12 @@ import { MessageOAuthError } from './message-oauth-error';
 import { isCredentialErrorMessage } from '@/lib/oauth-error-utils';
 import { Streamdown } from 'streamdown';
 import { useApproval } from '@/hooks/use-approval';
+import { ChevronRight, ScrollText } from 'lucide-react';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from './ui/collapsible';
 
 const PurePreviewMessage = ({
   message,
@@ -64,6 +70,9 @@ const PurePreviewMessage = ({
 }) => {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [showErrors, setShowErrors] = useState(false);
+  // Logs panel open state: null = follow isLoading (auto-open while the agent
+  // works, auto-collapse once the final answer lands); true/false = user choice.
+  const [logsOpen, setLogsOpen] = useState<boolean | null>(null);
 
   // Hook for handling MCP approval requests
   const { submitApproval, isSubmitting, pendingApprovalId } = useApproval({
@@ -114,6 +123,227 @@ const PurePreviewMessage = ({
     return errorParts.length > 0 && nonErrorParts.length === 0;
   }, [message.parts, errorParts.length]);
 
+  // Split rendered segments into two buckets:
+  //  - mainEls: the final answer, citations, interactive MCP approval prompts and
+  //    OAuth re-auth — everything the user should see directly in the chat.
+  //  - logEls: reasoning + completed tool calls (parameters/results) — the
+  //    "work", tucked into a collapsible Logs panel so the main window stays clean.
+  const mainEls: React.ReactNode[] = [];
+  const logEls: React.ReactNode[] = [];
+
+  partSegments?.forEach((parts, index) => {
+    const [part] = parts;
+    const { type } = part;
+    const key = `message-${message.id}-part-${index}`;
+
+    if (type === 'reasoning' && part.text?.trim().length > 0) {
+      logEls.push(
+        <MessageReasoning key={key} isLoading={isLoading} reasoning={part.text} />,
+      );
+      return;
+    }
+
+    if (type === 'text') {
+      if (isNamePart(part)) {
+        mainEls.push(
+          <Streamdown
+            key={key}
+            className="-mb-2 mt-0 border-l-4 pl-2 text-muted-foreground"
+          >{`# ${formatNamePart(part)}`}</Streamdown>,
+        );
+        return;
+      }
+      if (mode === 'view') {
+        mainEls.push(
+          <div key={key}>
+            <MessageContent
+              data-testid="message-content"
+              className={cn({
+                'w-fit break-words rounded-2xl px-3 py-2 text-right text-white':
+                  message.role === 'user',
+                'bg-transparent px-0 py-0 text-left':
+                  message.role === 'assistant',
+              })}
+              style={
+                message.role === 'user'
+                  ? { backgroundColor: '#006cff' }
+                  : undefined
+              }
+            >
+              <Response>
+                {sanitizeText(joinMessagePartSegments(parts))}
+              </Response>
+            </MessageContent>
+          </div>,
+        );
+        return;
+      }
+      if (mode === 'edit') {
+        mainEls.push(
+          <div key={key} className="flex w-full flex-row items-start gap-3">
+            <div className="size-8" />
+            <div className="min-w-0 flex-1">
+              <MessageEditor
+                key={message.id}
+                message={message}
+                setMode={setMode}
+                setMessages={setMessages}
+                regenerate={regenerate}
+              />
+            </div>
+          </div>,
+        );
+        return;
+      }
+      return;
+    }
+
+    // Databricks tool calls and results
+    if (part.type === `dynamic-tool`) {
+      const { toolCallId, input, state, errorText, output, toolName } = part;
+
+      // MCP tool call? (has approvalRequestId in metadata across all states)
+      const isMcpApproval =
+        part.callProviderMetadata?.databricks?.approvalRequestId != null;
+      const mcpServerName =
+        part.callProviderMetadata?.databricks?.mcpServerName?.toString();
+
+      const approved: boolean | undefined =
+        'approval' in part ? part.approval?.approved : undefined;
+
+      const effectiveState: ToolState = (() => {
+        if (
+          part.providerExecuted &&
+          !isLoading &&
+          state === 'input-available'
+        ) {
+          return 'output-available';
+        }
+        return state;
+      })();
+
+      let el: React.ReactNode;
+      if (isMcpApproval) {
+        el = (
+          <McpTool key={toolCallId} defaultOpen={true}>
+            <McpToolHeader
+              serverName={mcpServerName}
+              toolName={toolName}
+              state={effectiveState}
+              approved={approved}
+            />
+            <McpToolContent>
+              <McpToolInput input={input} />
+              {state === 'approval-requested' && (
+                <McpApprovalActions
+                  onApprove={() =>
+                    submitApproval({
+                      approvalRequestId: toolCallId,
+                      approve: true,
+                    })
+                  }
+                  onDeny={() =>
+                    submitApproval({
+                      approvalRequestId: toolCallId,
+                      approve: false,
+                    })
+                  }
+                  isSubmitting={
+                    isSubmitting && pendingApprovalId === toolCallId
+                  }
+                />
+              )}
+              {state === 'output-available' && output != null && (
+                <ToolOutput
+                  output={
+                    errorText ? (
+                      <div className="rounded border p-2 text-red-500">
+                        Error: {errorText}
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap font-mono text-sm">
+                        {typeof output === 'string'
+                          ? output
+                          : JSON.stringify(output, null, 2)}
+                      </div>
+                    )
+                  }
+                  errorText={undefined}
+                />
+              )}
+            </McpToolContent>
+          </McpTool>
+        );
+      } else {
+        el = (
+          <Tool key={toolCallId} defaultOpen={true}>
+            <ToolHeader type={toolName} state={effectiveState} />
+            <ToolContent>
+              <ToolInput input={input} />
+              {state === 'output-available' && (
+                <ToolOutput
+                  output={
+                    errorText ? (
+                      <div className="rounded border p-2 text-red-500">
+                        Error: {errorText}
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap font-mono text-sm">
+                        {typeof output === 'string'
+                          ? output
+                          : JSON.stringify(output, null, 2)}
+                      </div>
+                    )
+                  }
+                  errorText={undefined}
+                />
+              )}
+            </ToolContent>
+          </Tool>
+        );
+      }
+
+      // Interactive MCP approval prompts must stay in the main flow so the user
+      // can act on them; everything else (completed tool calls) goes to Logs.
+      const isInteractive = isMcpApproval && state === 'approval-requested';
+      (isInteractive ? mainEls : logEls).push(el);
+      return;
+    }
+
+    // Citations / annotations
+    if (type === 'source-url') {
+      mainEls.push(
+        <a
+          key={key}
+          href={part.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-baseline text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+        >
+          <sup className="text-xs">[{part.title || part.url}]</sup>
+        </a>,
+      );
+      return;
+    }
+
+    // OAuth errors inline
+    if (type === 'data-error' && isCredentialErrorMessage(part.data)) {
+      mainEls.push(
+        <MessageOAuthError
+          key={key}
+          error={part.data}
+          allMessages={allMessages}
+          setMessages={setMessages}
+          sendMessage={sendMessage}
+        />,
+      );
+      return;
+    }
+  });
+
+  // Follow isLoading until the user explicitly toggles the Logs panel.
+  const isLogsOpen = logsOpen ?? isLoading;
+
   return (
     <div
       data-testid={`message-${message.role}`}
@@ -156,218 +386,33 @@ const PurePreviewMessage = ({
             </div>
           )}
 
-          {partSegments?.map((parts, index) => {
-            const [part] = parts;
-            const { type } = part;
-            const key = `message-${message.id}-part-${index}`;
+          {/* Final answer, citations, interactive prompts, OAuth re-auth */}
+          {mainEls}
 
-            if (type === 'reasoning' && part.text?.trim().length > 0) {
-              return (
-                <MessageReasoning
-                  key={key}
-                  isLoading={isLoading}
-                  reasoning={part.text}
+          {/* Logs: reasoning + tool calls (parameters/results) */}
+          {logEls.length > 0 && (
+            <Collapsible
+              open={isLogsOpen}
+              onOpenChange={setLogsOpen}
+              className="w-full"
+            >
+              <CollapsibleTrigger className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground text-xs hover:bg-muted hover:text-foreground">
+                <ChevronRight
+                  className={cn('h-3.5 w-3.5 transition-transform', {
+                    'rotate-90': isLogsOpen,
+                  })}
                 />
-              );
-            }
-
-            if (type === 'text') {
-              if (isNamePart(part)) {
-                return (
-                  <Streamdown
-                    key={key}
-                    className="-mb-2 mt-0 border-l-4 pl-2 text-muted-foreground"
-                  >{`# ${formatNamePart(part)}`}</Streamdown>
-                );
-              }
-              if (mode === 'view') {
-                return (
-                  <div key={key}>
-                    <MessageContent
-                      data-testid="message-content"
-                      className={cn({
-                        'w-fit break-words rounded-2xl px-3 py-2 text-right text-white':
-                          message.role === 'user',
-                        'bg-transparent px-0 py-0 text-left':
-                          message.role === 'assistant',
-                      })}
-                      style={
-                        message.role === 'user'
-                          ? { backgroundColor: '#006cff' }
-                          : undefined
-                      }
-                    >
-                      <Response>
-                        {sanitizeText(joinMessagePartSegments(parts))}
-                      </Response>
-                    </MessageContent>
-                  </div>
-                );
-              }
-
-              if (mode === 'edit') {
-                return (
-                  <div
-                    key={key}
-                    className="flex w-full flex-row items-start gap-3"
-                  >
-                    <div className="size-8" />
-                    <div className="min-w-0 flex-1">
-                      <MessageEditor
-                        key={message.id}
-                        message={message}
-                        setMode={setMode}
-                        setMessages={setMessages}
-                        regenerate={regenerate}
-                      />
-                    </div>
-                  </div>
-                );
-              }
-            }
-
-            // Render Databricks tool calls and results
-            if (part.type === `dynamic-tool`) {
-              const { toolCallId, input, state, errorText, output, toolName } =
-                part;
-
-              // Check if this is an MCP tool call by looking for approvalRequestId in metadata
-              // This works across all states (approval-requested, approval-denied, output-available)
-              const isMcpApproval =
-                part.callProviderMetadata?.databricks?.approvalRequestId !=
-                null;
-              const mcpServerName =
-                part.callProviderMetadata?.databricks?.mcpServerName?.toString();
-
-              // Extract approval outcome for 'approval-responded' state
-              // When addToolApprovalResponse is called, AI SDK sets the `approval` property
-              // on the tool-call part and changes state to 'approval-responded'
-              const approved: boolean | undefined =
-                'approval' in part ? part.approval?.approved : undefined;
-
-              // When approved but only have approval status (not actual output), show as input-available
-              const effectiveState: ToolState = (() => {
-                if (
-                  part.providerExecuted &&
-                  !isLoading &&
-                  state === 'input-available'
-                ) {
-                  return 'output-available';
-                }
-                return state;
-              })();
-
-              // Render MCP tool calls with special styling
-              if (isMcpApproval) {
-                return (
-                  <McpTool key={toolCallId} defaultOpen={true}>
-                    <McpToolHeader
-                      serverName={mcpServerName}
-                      toolName={toolName}
-                      state={effectiveState}
-                      approved={approved}
-                    />
-                    <McpToolContent>
-                      <McpToolInput input={input} />
-                      {state === 'approval-requested' && (
-                        <McpApprovalActions
-                          onApprove={() =>
-                            submitApproval({
-                              approvalRequestId: toolCallId,
-                              approve: true,
-                            })
-                          }
-                          onDeny={() =>
-                            submitApproval({
-                              approvalRequestId: toolCallId,
-                              approve: false,
-                            })
-                          }
-                          isSubmitting={
-                            isSubmitting && pendingApprovalId === toolCallId
-                          }
-                        />
-                      )}
-                      {state === 'output-available' && output != null && (
-                        <ToolOutput
-                          output={
-                            errorText ? (
-                              <div className="rounded border p-2 text-red-500">
-                                Error: {errorText}
-                              </div>
-                            ) : (
-                              <div className="whitespace-pre-wrap font-mono text-sm">
-                                {typeof output === 'string'
-                                  ? output
-                                  : JSON.stringify(output, null, 2)}
-                              </div>
-                            )
-                          }
-                          errorText={undefined}
-                        />
-                      )}
-                    </McpToolContent>
-                  </McpTool>
-                );
-              }
-
-              // Render regular tool calls
-              return (
-                <Tool key={toolCallId} defaultOpen={true}>
-                  <ToolHeader type={toolName} state={effectiveState} />
-                  <ToolContent>
-                    <ToolInput input={input} />
-                    {state === 'output-available' && (
-                      <ToolOutput
-                        output={
-                          errorText ? (
-                            <div className="rounded border p-2 text-red-500">
-                              Error: {errorText}
-                            </div>
-                          ) : (
-                            <div className="whitespace-pre-wrap font-mono text-sm">
-                              {typeof output === 'string'
-                                ? output
-                                : JSON.stringify(output, null, 2)}
-                            </div>
-                          )
-                        }
-                        errorText={undefined}
-                      />
-                    )}
-                  </ToolContent>
-                </Tool>
-              );
-            }
-
-            // Support for citations/annotations
-            if (type === 'source-url') {
-              return (
-                <a
-                  key={key}
-                  href={part.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-baseline text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                >
-                  <sup className="text-xs">[{part.title || part.url}]</sup>
-                </a>
-              );
-            }
-
-            // Render OAuth errors inline
-            if (type === 'data-error' && isCredentialErrorMessage(part.data)) {
-              return (
-                <MessageOAuthError
-                  key={key}
-                  error={part.data}
-                  allMessages={allMessages}
-                  setMessages={setMessages}
-                  sendMessage={sendMessage}
-                />
-              );
-            }
-          })}
+                <ScrollText className="h-3.5 w-3.5" />
+                <span className="font-medium">Logs</span>
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {logEls.length} step{logEls.length === 1 ? '' : 's'}
+                </span>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-2 flex flex-col gap-2 border-muted border-l-2 pl-3">
+                {logEls}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
 
           {!isReadonly && !hasOnlyErrors && (
             <MessageActions

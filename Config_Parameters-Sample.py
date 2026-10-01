@@ -46,9 +46,9 @@
 # MAGIC - ✅ AI/Vector Search Index     : `<CATALOG>.<SCHEMA>-product-docs-index`
 # MAGIC - ✅ AI Gatway Route            : `<USERNAME>-databank-llm-route`
 # MAGIC - ✅ Agent Endpoint             : `<USERNAME>-databank-ai-advisor`
-# MAGIC - ✅ Foundation Model           : `system.ai.gemma-3-12b`
+# MAGIC - ✅ Foundation Model           : `system.ai.databricks-claude-sonnet-4-5`
 # MAGIC - ✅ Embedded Model             : `databricks-gte-large-en`
-# MAGIC - ✅ Fallback Model             : `kimi_k3`
+# MAGIC - ✅ Fallback Model             : `system.ai.gemma-3-12b`
 # MAGIC - ✅ Genie Space                : `{USERNAME}-DataBank-Financial-Advisor`
 # MAGIC
 

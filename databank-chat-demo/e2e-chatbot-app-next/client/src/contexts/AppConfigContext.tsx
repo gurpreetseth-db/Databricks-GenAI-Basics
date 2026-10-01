@@ -2,7 +2,10 @@ import { createContext, useContext, type ReactNode } from 'react';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/utils';
 
+export type MemoryMode = 'simple' | 'shortterm' | 'longterm';
+
 interface ConfigResponse {
+  memoryMode?: MemoryMode;
   features: {
     chatHistory: boolean;
     feedback: boolean;
@@ -15,6 +18,7 @@ interface AppConfigContextType {
   error: Error | undefined;
   chatHistoryEnabled: boolean;
   feedbackEnabled: boolean;
+  memoryMode: MemoryMode;
 }
 
 const AppConfigContext = createContext<AppConfigContextType | undefined>(
@@ -40,6 +44,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     // Default to true until loaded to avoid breaking existing behavior
     chatHistoryEnabled: data?.features.chatHistory ?? true,
     feedbackEnabled: data?.features.feedback ?? false,
+    memoryMode: data?.memoryMode ?? 'simple',
   };
 
   return (

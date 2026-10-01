@@ -23,8 +23,8 @@ Every module is a standalone Databricks notebook. Each notebook runs `%run ./Con
 
 1. **Clone the repo** (locally, or as a Databricks Git folder):
    ```bash
-   git clone https://github.com/gurpreetseth-db/Databricks-GenAI-Basics.git
-   cd Databricks-GenAI-Basics
+   git clone https://github.com/gurpreetseth-db/Databricks-GenAI-Bootcamp.git
+   cd Databricks-GenAI-Bootcamp
    ```
 2. **Create your config from the template.** `Config_Parameters.py` is gitignored
    so your values stay local — copy the template notebook and edit it:
@@ -326,7 +326,7 @@ workspace, override at deploy time — e.g. `--var username=jdoe`.
 ## Files in This Repo
 
 ```
-Databricks-GenAI-Basics/
+Databricks-GenAI-Bootcamp/
 ├── README.md                          ← This guide
 ├── databricks.yml                     ← Databricks Asset Bundle (deploys the whole repo + app)
 ├── Config_Parameters-Sample.py        ← Template notebook — copy to Config_Parameters.py (gitignored) and edit

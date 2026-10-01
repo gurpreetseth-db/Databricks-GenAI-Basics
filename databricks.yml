@@ -1,5 +1,5 @@
 # =============================================================================
-# Databricks Asset Bundle — DataBank GenAI Basics
+# Databricks Asset Bundle — DataBank GenAI Bootcamp
 # =============================================================================
 # `databricks bundle deploy` uploads the ENTIRE codebase (lab notebooks 00-12,
 # Config_Parameters.py, lib/, img/, and the databank-chat-demo app) to the
@@ -22,7 +22,7 @@
 # single source of truth. Override for another user with, e.g., --var username=jdoe
 # =============================================================================
 bundle:
-  name: databank-genai-basics
+  name: databank-genai-bootcamp
 
 # Config_Parameters.py is gitignored (each user copies it from the .sample), but
 # the lab notebooks `%run ./Config_Parameters`, so force it into the sync set.

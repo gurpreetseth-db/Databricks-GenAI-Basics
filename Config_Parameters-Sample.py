@@ -4,10 +4,13 @@
 # environment_version = "5"
 # ///
 # =============================================================================
-# TEMPLATE — copy this file to `Config_Parameters.py`, then edit, before running
-# any lab notebook:
+# TEMPLATE NOTEBOOK — copy this to `Config_Parameters.py`, then edit, before
+# running any lab notebook:
 #
-#     cp Config_Parameters.py.sample Config_Parameters.py
+#     cp Config_Parameters-Sample.py Config_Parameters.py
+#
+# (In the Databricks workspace: open this notebook → File → Clone → name it
+# `Config_Parameters`.)
 #
 # `Config_Parameters.py` is gitignored so your edits stay local. Most values are
 # derived automatically from your logged-in username; you normally only review:

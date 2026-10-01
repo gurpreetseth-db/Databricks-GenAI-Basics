@@ -1,0 +1,126 @@
+# =============================================================================
+# Databricks Asset Bundle — DataBank GenAI Basics
+# =============================================================================
+# `databricks bundle deploy` uploads the ENTIRE codebase (lab notebooks 00-12,
+# Config_Parameters.py, lib/, img/, and the databank-chat-demo app) to the
+# workspace and provisions the `databank-chat-demo` Databricks App (+ its
+# UC-function / Vector-Search / Genie resource bindings). Run the lab notebooks
+# yourself (interactively) to create the underlying assets, then deploy the app.
+#
+# The app's MEMORY MODE (simple | shortterm | longterm) is chosen by TARGET:
+#   databricks bundle deploy -t dev_simple    -p Myenv
+#   databricks bundle deploy -t dev_shortterm -p Myenv
+#   databricks bundle deploy -t dev_longterm  -p Myenv
+#
+# DAB creates the app + service principal and syncs the code. The dynamic,
+# per-SP bits DAB can't express — the app env (incl. resolved Lakebase host),
+# the model-service EXECUTE grant, catalog/schema data access, and the Lakebase
+# federated SP role — are applied afterward by:
+#   python databank-chat-demo/deploy_app.py -t dev_longterm -p Myenv
+#
+# Variable names/derivations mirror Config_Parameters.py so the bundle stays the
+# single source of truth. Override for another user with, e.g., --var username=jdoe
+# =============================================================================
+bundle:
+  name: databank-genai-basics
+
+# Config_Parameters.py is gitignored (each user copies it from the .sample), but
+# the lab notebooks `%run ./Config_Parameters`, so force it into the sync set.
+sync:
+  include:
+    - Config_Parameters.py
+
+variables:
+  username:
+    description: "Cleaned username (no dots/@), used to build catalog/schema/route names. Mirrors Config_Parameters.py username_clean."
+    default: gurpreetsethi
+  catalog:
+    description: "Unity Catalog holding the lab assets."
+    default: ${var.username}_databank_lab
+  schema:
+    description: "Schema under the catalog."
+    default: ${var.username}_financial_data
+  app_name:
+    description: "Databricks App name (lowercase, hyphenated, unique per workspace)."
+    default: databank-chat-demo
+  mode:
+    description: "Memory mode: simple | shortterm | longterm. Set per target."
+    default: simple
+  genie_space_id:
+    description: "Genie space id. Config_Parameters.py resolves this from GENIE_NAME; set it explicitly for the bundle."
+    default: "01f1b6c9b5ad17bca4c13c1991f01333"
+  experiment_id:
+    description: "MLflow experiment id (created by 06_ml_experiment / the setup job). Leave empty until it exists."
+    default: ""
+  uc_functions:
+    description: "Comma-separated UC function names exposed to the agent."
+    default: "calculate_customer_risk,flag_suspicious_transactions,get_portfolio_summary"
+  lakebase_project:
+    description: "Lakebase (autoscaling) project id — used by shortterm/longterm modes."
+    default: agentic-memory
+  lakebase_branch:
+    default: production
+  lakebase_endpoint:
+    default: primary
+  lakebase_database:
+    default: databricks_postgres
+  lakebase_schema:
+    default: conversation_memory
+
+resources:
+  apps:
+    databank_chat_demo:
+      name: ${var.app_name}
+      description: "DataBank chat demo (${var.mode} memory mode)"
+      source_code_path: ./databank-chat-demo
+      # App-resource bindings DAB CAN express (grants the app SP access to these
+      # securables). The AI Gateway model-service EXECUTE grant, table-level
+      # SELECT for Genie SQL, and the Lakebase federated role are applied by
+      # deploy_app.py (DAB's uc_securable type has no model_service, and there is
+      # no federated-Postgres-role primitive).
+      resources:
+        - name: fn_calculate_customer_risk
+          uc_securable:
+            securable_full_name: ${var.catalog}.${var.schema}.calculate_customer_risk
+            securable_type: FUNCTION
+            permission: EXECUTE
+        - name: fn_flag_suspicious_txn
+          uc_securable:
+            securable_full_name: ${var.catalog}.${var.schema}.flag_suspicious_transactions
+            securable_type: FUNCTION
+            permission: EXECUTE
+        - name: fn_get_portfolio_summary
+          uc_securable:
+            securable_full_name: ${var.catalog}.${var.schema}.get_portfolio_summary
+            securable_type: FUNCTION
+            permission: EXECUTE
+        - name: vector_search
+          uc_securable:
+            securable_full_name: ${var.catalog}.${var.schema}.product-docs-index
+            securable_type: TABLE
+            permission: SELECT
+        - name: genie_space
+          genie_space:
+            name: genie_space
+            space_id: ${var.genie_space_id}
+            permission: CAN_RUN
+
+targets:
+  dev_simple:
+    default: true
+    workspace:
+      host: https://dbc-31a46e3c-394b.cloud.databricks.com
+    variables:
+      mode: simple
+
+  dev_shortterm:
+    workspace:
+      host: https://dbc-31a46e3c-394b.cloud.databricks.com
+    variables:
+      mode: shortterm
+
+  dev_longterm:
+    workspace:
+      host: https://dbc-31a46e3c-394b.cloud.databricks.com
+    variables:
+      mode: longterm

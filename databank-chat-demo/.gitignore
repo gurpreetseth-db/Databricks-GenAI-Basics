@@ -13,8 +13,8 @@ dist/
 backend.log
 frontend.log
 
-# Generated at deploy time from Config_Parameters.py (never hand-edited)
-app.yaml
+# NOTE: app.yaml is committed (a base spec DAB deploys). deploy_app.py uploads
+# the full per-mode app.yaml to the workspace copy, not to this file.
 
 # Local env + OS
 .env

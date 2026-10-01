@@ -3,6 +3,24 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
+# =============================================================================
+# TEMPLATE — copy this file to `Config_Parameters.py`, then edit, before running
+# any lab notebook:
+#
+#     cp Config_Parameters.py.sample Config_Parameters.py
+#
+# `Config_Parameters.py` is gitignored so your edits stay local. Most values are
+# derived automatically from your logged-in username; you normally only review:
+#   * CATALOG_STORAGE  — set only if your metastore has no default storage root
+#   * FOUNDATION_MODEL / FALLBACK_MODEL / EMBEDDING_MODEL — the models you use
+#   * GENIE_SPACE_ID   — auto-resolved from GENIE_NAME; hard-code it if the
+#                        lookup can't run
+#   * LAKEBASE_PROJECT — the autoscaling Lakebase project for chat memory
+#   * APP_NAME         — the Databricks App name for the chat demo
+#
+# These same names are the defaults in databricks.yml (the bundle). Keep the two
+# in sync, or override at deploy time with `--var`.
+# =============================================================================
 # MAGIC %md
 # MAGIC ## 🏦 DataBank AI Lab — Configure Parameters
 # MAGIC **Duration:** ~5 minutes | **Track:** All participants

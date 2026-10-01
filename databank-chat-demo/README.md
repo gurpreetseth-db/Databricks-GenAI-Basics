@@ -10,18 +10,25 @@ Agent, and Vector Search index — in one of three selectable **memory modes**.
 | `shortterm` | this session only (resets on reopen) | conversation log in Lakebase |
 | `longterm`  | all past sessions (per user)         | + durable fact recall across sessions |
 
-## Deploy
+## Deploy (Databricks Asset Bundle)
 
-From the calling notebook `../12_deploy_chat_app.py` (runs `Config_Parameters`, pick a
-mode, deploy), or directly:
+This app ships as part of the repo-root **bundle** (`../databricks.yml`). The memory
+mode is a bundle **target** (`dev_simple` / `dev_shortterm` / `dev_longterm`). From the
+repo root:
 
 ```bash
-python deploy_app.py --mode simple    --profile <profile>
-python deploy_app.py --mode shortterm --profile <profile>
-python deploy_app.py --mode longterm  --profile <profile>
+# 1) DAB creates the app + SP and syncs the code:
+databricks bundle deploy -t dev_longterm -p <profile>
+
+# 2) deploy_app.py applies the env + grants DAB can't express, then redeploys:
+python databank-chat-demo/deploy_app.py -t dev_longterm -p <profile>
 ```
 
-Re-running with a different `--mode` redeploys the same app in that mode.
+Or run `../12_deploy_chat_app.py` in the workspace and pick the `mode` widget (it does
+both steps). Re-deploying a different target retargets the **same** app to that mode.
+
+`deploy_app.py` reads the resolved config from `databricks bundle summary`, so
+`databricks.yml` stays the single source of truth (no values are hand-passed).
 
 ## Layout
 
@@ -31,8 +38,12 @@ Re-running with a different `--mode` redeploys the same app in that mode.
   facts (short/long modes); auto-creates its schema.
 - `e2e-chatbot-app-next/` — vendored chat UI. `shortterm` mode scopes history to a
   per-browser session via a session cookie (see `server/src/middleware/auth.ts`).
-- `deploy_app.py` — creates/updates the app + tool resources, generates `app.yaml`,
-  grants Lakebase to the app service principal (short/long), syncs and deploys.
+- `app.yaml` — committed **base** spec (start command + static env) that DAB deploys.
+  `deploy_app.py` uploads the full per-mode `app.yaml` to the workspace copy; it does
+  not modify the committed file.
+- `deploy_app.py` — post-deploy configurator: reads resolved config from the bundle,
+  grants the app SP model-service EXECUTE + catalog/schema access + a federated Lakebase
+  role (short/long), writes the full `app.yaml`, and redeploys the app.
 
 ## Modes: implementation notes
 
